@@ -1,76 +1,75 @@
 package xyz.hyperreal.sysl
 
+import java.io.{File, PrintStream}
+
 object Main extends App {
 
   case class Options(
-      source: Boolean = false,
-      lexer: Boolean = false,
       parser: Boolean = false,
-      interp: Boolean = false,
       gen: Boolean = false,
-      run: Boolean = false
+      run: Boolean = false,
+      files: List[File] = Nil,
+      out: File = null
   )
 
-  private val optionsParser = new scopt.OptionParser[Options]("rosettacodeCompiler") {
-    head("Rosetta Code Compiler", "v0.1")
+  private val optionsParser = new scopt.OptionParser[Options]("sysl") {
+    head("SysL Compiler", "v0.1.0")
+    arg[File]("<source file>...")
+      .unbounded()
+      .action((x, c) => c.copy(files = c.files :+ x))
+      .validate(
+        x =>
+          if (!x.exists)
+            failure(s"not found: $x")
+          else if (x.isFile && x.canRead)
+            success
+          else
+            failure(s"unreadable: $x"))
+      .text("source file(s) to compile")
     opt[Unit]('g', "gen")
       .action((_, c) => c.copy(gen = true))
-      .text("run code generator (only unless -s is used)")
+      .text("run code generator")
     help("help").text("print this usage text").abbr("h")
-    opt[Unit]('i', "interp")
-      .action((_, c) => c.copy(interp = true))
-      .text("run interpreter (only unless -s is used)")
-    opt[Unit]('l', "lexer")
-      .action((_, c) => c.copy(lexer = true))
-      .text("run lexer only")
     opt[Unit]('p', "parser")
       .action((_, c) => c.copy(parser = true))
-      .text("run parser (only unless -s is used)")
+      .text("run parser")
     opt[Unit]('r', "run")
       .action((_, c) => c.copy(run = true))
-      .text("run using virtual machine (only unless -s is used)")
-    opt[Unit]('s', "source")
-      .action((_, c) => c.copy(source = true))
-      .text("run all prior steps")
-    version("version").text("print the version").abbr("v")
+      .text("run bitcode interpreter")
+    opt[File]('o', "out")
+      .withFallback(() => new File("a.out"))
+      .valueName("<output file>")
+      .action((x, c) => c.copy(out = x))
+      .validate(
+        x =>
+          if (!x.exists || x.canWrite)
+            success
+          else
+            failure(s"Option --out: can't write to $x"))
+      .text("optional output file")
+    version("version")
+      .text("print the version")
+      .abbr("v")
   }
 
   optionsParser.parse(args, Options()) match {
     case Some(options) =>
-//      if (options.lexer)
-//        LexicalAnalyzer.apply.fromStdin
-//      else if (options.parser && options.source)
-//        SyntaxAnalyzer.apply.fromString(capture(LexicalAnalyzer.apply.fromStdin))
-//      else if (options.parser)
-//        SyntaxAnalyzer.apply.fromStdin
-//      else if (options.gen && options.source)
-//        CodeGenerator.fromString(capture(SyntaxAnalyzer.apply.fromString(capture(LexicalAnalyzer.apply.fromStdin))))
-//      else if (options.gen)
-//        CodeGenerator.fromStdin
-//      else if (options.run && options.source)
-//        time(
-//          VirtualMachine
-//            .fromString(capture(CodeGenerator.fromString(
-//              capture(SyntaxAnalyzer.apply.fromString(capture(LexicalAnalyzer.apply.fromStdin))))))
-//            .run)
-//      else if (options.run)
-//        time(VirtualMachine.fromStdin.run)
-//      else if (options.interp && options.source || !options.interp && !options.source)
-//        time(
-//          ASTInterpreter.fromString(capture(SyntaxAnalyzer.apply.fromString(capture(LexicalAnalyzer.apply.fromStdin)))))
-//      else if (options.interp)
-//        time(ASTInterpreter.fromStdin)
-//      else if (options.source) {
-//        optionsParser.showUsageAsError
-//        optionsParser.reportError("-s should be used with one of the compiler stage options")
-//      }
+      if (options.run && options.out != null) {
+        optionsParser.showUsageAsError
+        optionsParser.reportError("Options --run and --out should not be used together")
+      } else if (options.parser) {} else if (options.gen) {} else if (options.run) { interp(options.files) } else if (options.out != null) {
+        executable(options.out, options.files)
+      }
     case None => sys.exit(1)
   }
 
-  def time(block: => Unit) = {
-    val start = System.currentTimeMillis
+  def interp(files: List[File]) = {}
 
-    block
-    println(f"\nCompleted in ${(System.currentTimeMillis - start) / 1000.0}%.3fs")
-  }
+  def executable(out: File, srcs: List[File]) = { println(out) }
+//  def time(block: => Unit) = {
+//    val start = System.currentTimeMillis
+//
+//    block
+//    println(f"\nCompleted in ${(System.currentTimeMillis - start) / 1000.0}%.3fs")
+//  }
 }

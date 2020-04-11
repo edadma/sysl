@@ -921,11 +921,7 @@ class SyslParser extends StandardTokenParsers with PackratParsers {
       typePattern
 
   lazy val typePattern: PackratParser[PatternAST] =
-    consPattern ~ (":" ~> ident) ^^ { case pat ~ typename => TypePatternAST(pat, typename) } |
-      consPattern
-
-  lazy val consPattern: PackratParser[PatternAST] =
-    pos ~ primaryPattern ~ ("::" ~> consPattern) ^^ { case p ~ h ~ t => ConsPatternAST(p, h, t) } |
+    primaryPattern ~ (":" ~> ident) ^^ { case pat ~ typename => TypePatternAST(pat, typename) } |
       primaryPattern
 
   lazy val primaryPattern: PackratParser[PatternAST] =
@@ -937,11 +933,9 @@ class SyslParser extends StandardTokenParsers with PackratParsers {
         case p ~ n ~ l => RecordPatternAST(p, n, l)
       } |
       pos ~ ident ^^ { case p ~ n => VariablePatternAST(p, n) } |
-      pos ~ ("(" ~> pattern <~ ",") ~ (rep1sep(pattern, ",") <~ ")") ^^ {
-        case p ~ e ~ l => TuplePatternAST(p, e +: l)
-      } |
-      pos ~ ("[" ~> repsep(pattern, ",") <~ "]") ^^ { case p ~ l    => ListPatternAST(p, l) } |
-      pos ~ "{" ~ repsep(ident, ",") ~ "}" ^^ { case p ~ _ ~ es ~ _ => MapPatternAST(p, es.toSet) } |
+//      pos ~ ("(" ~> pattern <~ ",") ~ (rep1sep(pattern, ",") <~ ")") ^^ {
+//        case p ~ e ~ l => TuplePatternAST(p, e +: l)
+//      } |
       "(" ~> pattern <~ ")"
 }
 
