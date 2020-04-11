@@ -1,6 +1,6 @@
 package xyz.hyperreal.sysl
 
-import java.io.{File, PrintStream}
+import java.io.File
 
 object Main extends App {
 
