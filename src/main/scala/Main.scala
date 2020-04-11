@@ -72,12 +72,18 @@ object Main extends App {
   }
 
   def parse(files: List[File]) = {
-    val parser = new SyslParser
+    def parse(in: File) = {
+      val parser = new SyslParser
 
-    parser.parseFromSource(io.Source.fromFile(files.head), parser.source)
+      parser.parseFromSource(io.Source.fromFile(files.head), parser.source)
+    }
+
+    files map parse
   }
 
-  def generate(files: List[File]) = {}
+  def generate(files: List[File]) = {
+    CodeGenerator(parse(files))
+  }
 
   def interp(files: List[File]) = {}
 
