@@ -317,8 +317,7 @@ class SyslParser extends StandardTokenParsers with PackratParsers {
   lazy val statements = rep1(statement)
 
   lazy val statement: PackratParser[StatementAST] =
-    expressionStatement |
-      declarationStatement |
+    declarationStatement |
       directiveStatement
 
   lazy val expressionStatement: PackratParser[ExpressionAST] = expression <~ Newline
