@@ -1,4 +1,3 @@
--scala-native
-=============
+SysL
+====
 
-This is a template project for Scala native.

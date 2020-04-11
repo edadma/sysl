@@ -1,4 +1,4 @@
-package xyz.hyperreal._scala_native
+package xyz.hyperreal.sysl
 
 import utest._
 

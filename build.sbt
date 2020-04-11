@@ -1,4 +1,4 @@
-name := "-scala-native"
+name := "sysl"
 
 version := "0.1.0"
 
@@ -27,6 +27,14 @@ homepage := Some(url("https://github.com/edadma/" + name.value))
 libraryDependencies += "com.lihaoyi" %%% "utest" % "0.7.1" % "test"
 
 testFrameworks += new TestFramework( "utest.runner.Framework" )
+
+libraryDependencies ++= Seq(
+  "xyz.hyperreal" %%% "indentation-lexical-native" % "0.9.1"
+)
+
+libraryDependencies ++= Seq(
+  "org.scala-lang.modules" %%% "scala-parser-combinators" % "1.1.2"
+)
 
 libraryDependencies ++= Seq(
   "com.github.scopt" %%% "scopt" % "3.7.1"
