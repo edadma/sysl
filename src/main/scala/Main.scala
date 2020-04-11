@@ -37,8 +37,8 @@ object Main extends App {
       .action((_, c) => c.copy(run = true))
       .text("run bitcode interpreter")
     opt[File]('o', "out")
-      .withFallback(() => new File("a.out"))
-      .valueName("<output file>")
+      .optional()
+      .valueName("<executable file>")
       .action((x, c) => c.copy(out = x))
       .validate(
         x =>
@@ -46,7 +46,7 @@ object Main extends App {
             success
           else
             failure(s"Option --out: can't write to $x"))
-      .text("optional output file")
+      .text("optional executable output file")
     version("version")
       .text("print the version")
       .abbr("v")
@@ -54,14 +54,30 @@ object Main extends App {
 
   optionsParser.parse(args, Options()) match {
     case Some(options) =>
-      if (options.run && options.out != null) {
+      if ((options.parser | options.gen | options.run) && options.out != null) {
         optionsParser.showUsageAsError
-        optionsParser.reportError("Options --run and --out should not be used together")
-      } else if (options.parser) {} else if (options.gen) {} else if (options.run) { interp(options.files) } else if (options.out != null) {
+        optionsParser.reportError("Option --out is only for compiler output")
+        sys.exit(1)
+      } else if (options.parser) {
+        println(parse(options.files))
+      } else if (options.gen) {
+        println(generate(options.files))
+      } else if (options.run) {
+        interp(options.files)
+      } else if (options.out != null)
         executable(options.out, options.files)
-      }
+      else
+        executable(new File("executable"), options.files)
     case None => sys.exit(1)
   }
+
+  def parse(files: List[File]) = {
+    val parser = new SyslParser
+
+    parser.parseFromSource(io.Source.fromFile(files.head), parser.source)
+  }
+
+  def generate(files: List[File]) = {}
 
   def interp(files: List[File]) = {}
 
