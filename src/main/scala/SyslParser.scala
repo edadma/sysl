@@ -188,12 +188,9 @@ class SyslLexical
     "for",
     "if",
     "import",
-    "in",
-    "is",
     "match",
     "mod",
     "module",
-    "new",
     "not",
     "null",
     "or",
@@ -201,7 +198,6 @@ class SyslLexical
     "repeat",
     "return",
     "then",
-    "trait",
     "true",
     "type",
     "until",
@@ -259,7 +255,6 @@ class SyslLexical
     "++",
     "--",
     "...",
-    "::",
     "=>"
   )
 }
@@ -599,12 +594,8 @@ class SyslParser extends StandardTokenParsers with PackratParsers {
     ) ^^ {
       case pl ~ l ~ cs => ComparisonExpressionAST(pl, l, cs)
     } |
-      pos ~ alternationExpression ~ ("div" | "in" | "not" ~ "in" ^^^ "notin") ~ pos ~ alternationExpression ^^ {
+      pos ~ alternationExpression ~ "div" ~ pos ~ alternationExpression ^^ {
         case pl ~ l ~ op ~ pr ~ r => BinaryExpressionAST(pl, l, op, pr, r)
-      } |
-      alternationExpression ~ "is" ~ ident ^^ { case e ~ _ ~ t => TypeExpressionAST(e, t) } |
-      alternationExpression ~ ("is" ~> "not" ~> ident) ^^ {
-        case e ~ t => NotExpressionAST(TypeExpressionAST(e, t))
       } |
       alternationExpression
 
@@ -763,150 +754,11 @@ class SyslParser extends StandardTokenParsers with PackratParsers {
           } else
             LiteralExpressionAST(s)
       } |
-      "(" ~> infix <~ ")" ^^ (
-          op =>
-            FunctionExpressionAST(
-              List(
-                FunctionPieceAST(
-                  null,
-                  List(VariablePatternAST(null, "#a"), VariablePatternAST(null, "#b")),
-                  false,
-                  List(
-                    FunctionPart(
-                      None,
-                      BinaryExpressionAST(
-                        null,
-                        VariableExpressionAST(null, "#a"),
-                        op,
-                        null,
-                        VariableExpressionAST(null, "#b")
-                      )
-                    )
-                  ),
-                  Nil
-                )
-              )
-            )
-      ) |
-      ("(" ~> pos) ~ applyExpression ~ (infix <~ ")") ^^ {
-        case p ~ e ~ o =>
-          FunctionExpressionAST(
-            List(
-              FunctionPieceAST(
-                p,
-                List(VariablePatternAST(p, "#a")),
-                false,
-                List(
-                  FunctionPart(
-                    None,
-                    BinaryExpressionAST(null, e, o, p, VariableExpressionAST(null, "#a"))
-                  )
-                ),
-                Nil
-              )
-            )
-          )
-      } |
-      "(" ~> infix ~ pos ~ applyExpression <~ ")" ^^ {
-        case o ~ p ~ e =>
-          FunctionExpressionAST(
-            List(
-              FunctionPieceAST(
-                p,
-                List(VariablePatternAST(p, "#a")),
-                false,
-                List(
-                  FunctionPart(
-                    None,
-                    BinaryExpressionAST(null, VariableExpressionAST(null, "#a"), o, p, e)
-                  )
-                ),
-                Nil
-              )
-            )
-          )
-      } |
-      "(" ~> infixComparison <~ ")" ^^ (
-          op =>
-            FunctionExpressionAST(
-              List(
-                FunctionPieceAST(
-                  null,
-                  List(VariablePatternAST(null, "#a"), VariablePatternAST(null, "#b")),
-                  false,
-                  List(
-                    FunctionPart(
-                      None,
-                      ComparisonExpressionAST(
-                        null,
-                        VariableExpressionAST(null, "#a"),
-                        List((op, null, VariableExpressionAST(null, "#b")))
-                      )
-                    )
-                  ),
-                  Nil
-                )
-              )
-            )
-      ) |
-      ("(" ~> pos) ~ applyExpression ~ (infixComparison <~ ")") ^^ {
-        case p ~ e ~ o =>
-          FunctionExpressionAST(
-            List(
-              FunctionPieceAST(
-                p,
-                List(VariablePatternAST(p, "#a")),
-                false,
-                List(
-                  FunctionPart(
-                    None,
-                    ComparisonExpressionAST(
-                      null,
-                      e,
-                      List((o, p, VariableExpressionAST(null, "#a")))
-                    )
-                  )
-                ),
-                Nil
-              )
-            )
-          )
-      } |
-      "(" ~> infixComparison ~ pos ~ applyExpression <~ ")" ^^ {
-        case o ~ p ~ e =>
-          FunctionExpressionAST(
-            List(
-              FunctionPieceAST(
-                p,
-                List(VariablePatternAST(p, "#a")),
-                false,
-                List(
-                  FunctionPart(
-                    None,
-                    ComparisonExpressionAST(
-                      null,
-                      VariableExpressionAST(null, "#a"),
-                      List((o, p, e))
-                    )
-                  )
-                ),
-                Nil
-              )
-            )
-          )
-      } |
       ("true" | "false") ^^ (b => LiteralExpressionAST(b.toBoolean)) |
       "(" ~ ")" ^^^ LiteralExpressionAST(()) |
       "null" ^^^ LiteralExpressionAST(null) |
       pos ~ ident ^^ { case p ~ n => VariableExpressionAST(p, n) } |
       "(" ~> expression <~ ")"
-
-  lazy val infix =
-    "+" | "-" | "*" | "/" | """\""" | "\\%" | "^" | "%" |
-      "mod" | "in" | "not" ~ "in" ^^^ "notin" |
-      "::" //todo: add support for ranges
-
-  lazy val infixComparison = "==" | "!=" | "<" | ">" | "<=" | ">="
 
   lazy val pattern: PackratParser[PatternAST] = altPattern
 
