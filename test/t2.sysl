@@ -1,1 +1,3 @@
-def main = print( 123 )
+def main
+    print( 5 )
+    print( 123 )

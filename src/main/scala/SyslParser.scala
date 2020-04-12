@@ -312,11 +312,16 @@ class SyslParser extends StandardTokenParsers with PackratParsers {
 
   lazy val source: PackratParser[SourceAST] =
     Newline ^^^ SourceAST(Nil) |
-      statements ^^ SourceAST
+      rep1(topLevelStatement) ^^ SourceAST
 
   lazy val statements = rep1(statement)
 
   lazy val statement: PackratParser[StatementAST] =
+    expressionStatement |
+      declarationStatement |
+      directiveStatement
+
+  lazy val topLevelStatement: PackratParser[StatementAST] =
     declarationStatement |
       directiveStatement
 
