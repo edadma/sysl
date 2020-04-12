@@ -1,6 +1,6 @@
 package xyz.hyperreal.sysl
 
-import java.io.File
+import java.io.{File, FileOutputStream, PrintStream}
 
 object Main extends App {
 
@@ -87,7 +87,13 @@ object Main extends App {
 
   def interp(files: List[File]) = {}
 
-  def executable(out: File, srcs: List[File]) = { println(out) }
+  def executable(out: File, files: List[File]) = {
+    val s = new PrintStream(new FileOutputStream(out))
+
+    s.print(generate(files))
+    s.close
+  }
+
 //  def time(block: => Unit) = {
 //    val start = System.currentTimeMillis
 //

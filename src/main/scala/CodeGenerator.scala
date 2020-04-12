@@ -15,10 +15,11 @@ object CodeGenerator {
       line(s)
     }
 
-    compileSource(as.head)
-
-    def compileSource(src: SourceAST) =
+    def compileSource(src: SourceAST) = {
+      line("""@.number_str = private unnamed_addr constant [4 x i8] c"%d\0A\00", align 1""")
+      line("declare i32 @printf(i8*, ...)")
       src.stmts foreach compileTopLevelStatement
+    }
 
     def compileTopLevelStatement(stmt: StatementAST): Unit =
       stmt match {
@@ -34,7 +35,10 @@ object CodeGenerator {
                         where: List[DeclarationStatementAST]) = {
       val counter = new Counter
 
-      def operation(s: String) = indent(s"%${counter.next} = $s")
+      def operation(s: String) = {
+        indent(s"%${counter.next} = $s")
+        counter.current
+      }
 
       def compileStatement(stmt: StatementAST): Unit =
         stmt match {
@@ -44,8 +48,16 @@ object CodeGenerator {
 
       def compileExpression(expr: ExpressionAST): Int = {
         expr match {
-          case BlockExpressionAST(stmts)    => stmts foreach compileStatement
-          case LiteralExpressionAST(v: Int) => operation(v.toString)
+          case BlockExpressionAST(stmts) => stmts foreach compileStatement
+          case LiteralExpressionAST(v: Int) =>
+            indent(s"store i32 $v, i32* %${operation("alloca i32, align 4")}, align 4")
+            operation(s"load i32, i32* %${counter.current}, align 4")
+          case VariableExpressionAST(pos, "print") =>
+            indent(s"store i32 (i8*, ...)* @printf, i32 (i8*, ...)** %${operation("alloca i32, align 8")}, align 8")
+            operation(s"load i32, i32* %${counter.current}, align 4")
+          case ApplyExpressionAST(fpos, f @ VariableExpressionAST(_, "print"), apos, List((_, arg)), tailrecursive) =>
+            operation(
+              s"call i32 (i8*, ...) %${compileExpression(f)}(i8* getelementptr inbounds ([4 x i8], [4 x i8]* @.number_str, i64 0, i64 0), i32 %${compileExpression(arg)})")
         }
 
         counter.current
@@ -56,6 +68,9 @@ object CodeGenerator {
       indent("ret i32 0")
       line("}")
     }
+
+    compileSource(as.head)
+    out.toString
   }
 
 }
