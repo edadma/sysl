@@ -82,7 +82,8 @@ object Main extends App {
   }
 
   def generate(files: List[File]) = {
-    CodeGenerator(parse(files))
+    CodeGenerator(parse(files)) // opt -S --Oz
+    // use system() to run "opt"
   }
 
   def interp(files: List[File]) = {}
