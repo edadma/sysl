@@ -13,6 +13,7 @@ object Main extends App {
       opt: String = null,
       run: Boolean = false,
       files: List[File] = Nil,
+      arch: String = null,
       out: File = null
   )
 
@@ -30,6 +31,11 @@ object Main extends App {
           else
             failure(s"unreadable: $x"))
       .text("source file(s) to compile (- refers to standard input)")
+    opt[String]('a', "arch")
+      .optional()
+      .valueName("<arch>[,<cpuname>]")
+      .action((x, c) => c.copy(arch = x))
+      .text("target architecture")
     opt[Unit]('g', "gen")
       .action((_, c) => c.copy(gen = true))
       .text("run code generator")
