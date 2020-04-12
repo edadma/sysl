@@ -287,8 +287,8 @@ class SyslParser extends StandardTokenParsers with PackratParsers {
 
   lazy val onl = rep(Newline)
 
-  lazy val number: PackratParser[BigDecimal] =
-    numericLit ^^ BigDecimal.apply
+  lazy val number: PackratParser[Int] =
+    numericLit ^^ (_.toInt)
 //      (
 //          n =>
 //            if (n startsWith "0x") {

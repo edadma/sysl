@@ -53,8 +53,9 @@ object CodeGenerator {
             indent(s"store i32 $v, i32* %${operation("alloca i32, align 4")}, align 4")
             operation(s"load i32, i32* %${counter.current}, align 4")
           case VariableExpressionAST(pos, "print") =>
-            indent(s"store i32 (i8*, ...)* @printf, i32 (i8*, ...)** %${operation("alloca i32, align 8")}, align 8")
-            operation(s"load i32, i32* %${counter.current}, align 4")
+            indent(
+              s"store i32 (i8*, ...)* @printf, i32 (i8*, ...)** %${operation("alloca i32 (i8*, ...)*, align 8")}, align 8")
+            operation(s"load i32 (i8*, ...)*, i32 (i8*, ...)** %${counter.current}, align 8")
           case ApplyExpressionAST(fpos, f @ VariableExpressionAST(_, "print"), apos, List((_, arg)), tailrecursive) =>
             operation(
               s"call i32 (i8*, ...) %${compileExpression(f)}(i8* getelementptr inbounds ([4 x i8], [4 x i8]* @.number_str, i64 0, i64 0), i32 %${compileExpression(arg)})")
@@ -88,6 +89,6 @@ class Counter {
     if (count == 0)
       sys.error("no last count")
     else
-      count - 1
+      count
 
 }
