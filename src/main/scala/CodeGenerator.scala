@@ -48,8 +48,29 @@ object CodeGenerator {
 
       def compileExpression(expr: ExpressionAST): Int = {
         expr match {
+          case UnaryExpressionAST("+", pos, expr) => compileExpression(expr)
+          case UnaryExpressionAST("-", pos, expr) =>
+            operation(s"sub i32 0, %${compileExpression(expr)}")
           case BinaryExpressionAST(lpos, left, "+", rpos, right) =>
             operation(s"add i32 %${compileExpression(left)}, %${compileExpression(right)}")
+          case BinaryExpressionAST(lpos, left, "-", rpos, right) =>
+            operation(s"sub i32 %${compileExpression(left)}, %${compileExpression(right)}")
+          case BinaryExpressionAST(lpos, left, "*", rpos, right) =>
+            operation(s"mul i32 %${compileExpression(left)}, %${compileExpression(right)}")
+          case BinaryExpressionAST(lpos, left, "/", rpos, right) =>
+            operation(s"sdiv i32 %${compileExpression(left)}, %${compileExpression(right)}")
+          case ComparisonExpressionAST(lpos, left, List(("==", rpos, right))) =>
+            operation(s"icmp eq i32 %${compileExpression(left)}, %${compileExpression(right)}")
+          case ComparisonExpressionAST(lpos, left, List(("!=", rpos, right))) =>
+            operation(s"icmp ne i32 %${compileExpression(left)}, %${compileExpression(right)}")
+          case ComparisonExpressionAST(lpos, left, List((">", rpos, right))) =>
+            operation(s"icmp sgt i32 %${compileExpression(left)}, %${compileExpression(right)}")
+          case ComparisonExpressionAST(lpos, left, List((">=", rpos, right))) =>
+            operation(s"icmp sge i32 %${compileExpression(left)}, %${compileExpression(right)}")
+          case ComparisonExpressionAST(lpos, left, List(("<", rpos, right))) =>
+            operation(s"icmp slt i32 %${compileExpression(left)}, %${compileExpression(right)}")
+          case ComparisonExpressionAST(lpos, left, List(("<=", rpos, right))) =>
+            operation(s"icmp sle i32 %${compileExpression(left)}, %${compileExpression(right)}")
           case BlockExpressionAST(stmts) => stmts foreach compileStatement
           case LiteralExpressionAST(v: Int) =>
             indent(s"store i32 $v, i32* %${operation("alloca i32, align 4")}, align 4")
