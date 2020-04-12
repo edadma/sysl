@@ -2,6 +2,9 @@ package xyz.hyperreal.sysl
 
 import java.io.{File, FileOutputStream, PrintStream}
 
+import scala.scalanative.native
+import scala.scalanative.native._
+
 object Main extends App {
 
   case class Options(
@@ -100,11 +103,41 @@ object Main extends App {
   }
 
   def generate(files: List[File], optimization: String) = {
-    CodeGenerator(parse(files)) // opt -S --Oz
-    // use system() to run "opt"
+    val code = CodeGenerator(parse(files))
+
+    if (optimization eq null)
+      code
+    else {
+      val f = temp(code, ".ll").toString
+      val r = File.createTempFile("sysl-opt-", ".ll")
+
+      system(s"opt -S --O$optimization $f >$r")
+
+      val s   = io.Source.fromFile(r)
+      val res = s.mkString
+
+      s.close
+      res
+    }
   }
 
-  def interp(files: List[File]) = {}
+  def temp(s: String, suffix: String) = {
+    val f = File.createTempFile("sysl-", suffix)
+
+    write(s, f)
+    f
+  }
+
+  def system(cmd: String) =
+    Zone { implicit z =>
+      val s = toCString(cmd)
+
+      libc.system(s)
+    }
+
+  def interp(files: List[File]) = {
+    system(s"lli ${temp(generate(files, "z"), ".ll")}")
+  }
 
   def executable(out: File, files: List[File], optimization: String) = {
     write(generate(files, optimization), out)
@@ -115,6 +148,11 @@ object Main extends App {
 
     st.print(s)
     st.close
+  }
+
+  @native.extern
+  object libc {
+    def system(command: native.Ptr[CChar]): native.CInt = native.extern
   }
 
 //  def time(block: => Unit) = {
