@@ -69,17 +69,28 @@ object Main extends App {
 
   optionsParser.parse(args, Options()) match {
     case Some(options) =>
-      if ((options.parser | options.gen | options.run) && options.out != null) {
+      /*if ((options.parser | options.gen | options.run) && options.out != null) {
         optionsParser.showUsageAsError
         optionsParser.reportError("Option --out is only for compiler output")
         sys.exit(1)
-      } else if (options.parser) {
-        println(parse(options.files))
+      } else*/
+      if (options.parser) {
+        val asl = parse(options.files).head
+
+        if (options.out ne null)
+          write(asl.toString, options.out)
+        else
+          println(asl)
       } else if (options.gen) {
-        println(generate(options.files, options.opt))
+        val code = generate(options.files, options.opt)
+
+        if (options.out ne null)
+          write(code, options.out)
+        else
+          println(code)
       } else if (options.run) {
         interp(options.files)
-      } else if (options.out != null)
+      } else if (options.out ne null)
         executable(options.out, options.files, options.opt)
       else
         executable(new File("executable"), options.files, options.opt)
@@ -102,16 +113,16 @@ object Main extends App {
     files map parse
   }
 
-  def generate(files: List[File], optimization: String) = {
+  def generate(files: List[File], opt: String) = {
     val code = CodeGenerator(parse(files))
 
-    if (optimization eq null)
+    if (opt eq null)
       code
     else {
       val f = temp(code, ".ll").toString
       val r = File.createTempFile("sysl-opt-", ".ll")
 
-      system(s"opt -S --O$optimization $f >$r")
+      system(s"opt -S --O$opt $f >$r")
 
       val s   = io.Source.fromFile(r)
       val res = s.mkString
@@ -139,8 +150,12 @@ object Main extends App {
     system(s"lli ${temp(generate(files, "z"), ".ll")}")
   }
 
-  def executable(out: File, files: List[File], optimization: String) = {
-    write(generate(files, optimization), out)
+  def executable(out: File, files: List[File], opt: String) = {
+    val ll   = temp(generate(files, opt), ".ll").toString
+    val name = ll.substring(0, ll.length - 3)
+
+    system(s"llc -O=1 --filetype=obj $ll")
+    system(s"gcc -no-pie ${name ++ ".o"} -o $out")
   }
 
   def write(s: String, f: File) = {
