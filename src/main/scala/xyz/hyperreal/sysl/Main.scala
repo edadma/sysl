@@ -10,12 +10,14 @@ object Main extends App {
   case class Options(
       parser: Boolean = false,
       gen: Boolean = false,
-      opt: String = null,
+      opt: (String, String) = null,
       run: Boolean = false,
       files: List[File] = Nil,
       arch: String = null,
       out: File = null
   )
+
+  val optRegex = "([0-3sz])(?:,([1-3]))?" r
 
   private val optionsParser = new scopt.OptionParser[Options]("sysl") {
     head("SysL Compiler", "v0.1.0")
@@ -49,13 +51,13 @@ object Main extends App {
     opt[String]('O', "opt")
       .optional()
       .valueName("<level>")
-      .action((x, c) => c.copy(opt = x))
       .validate(
         x =>
-          if (x.length == 1 && "0123sz".contains(x.head))
+          if (optRegex.pattern.matcher(x).matches)
             success
           else
-            failure(s"Option --opt should be one of 0, 1, 2, 3, s or z"))
+            failure(s"Option --opt argument should match ([0-3sz])(?:,([1-3]))?"))
+      .action((x, c) => c.copy(opt = x match { case optRegex(a, b) => (a, b) }))
       .text("optional optimization level")
     opt[File]('o', "out")
       .optional()
@@ -114,7 +116,7 @@ object Main extends App {
     files map parse
   }
 
-  def generate(files: List[File], opt: String) = {
+  def generate(files: List[File], opt: (String, String)) = {
     val code = CodeGenerator(parse(files))
 
     if (opt eq null)
@@ -123,7 +125,7 @@ object Main extends App {
       val f = temp(code, ".ll").toString
       val r = File.createTempFile("sysl-opt-", ".ll")
 
-      system(s"opt -S --O$opt $f >$r")
+      system(s"opt -S --O${opt._1} $f >$r")
 
       val s   = io.Source.fromFile(r)
       val res = s.mkString
@@ -140,22 +142,25 @@ object Main extends App {
     f
   }
 
-  def system(cmd: String) =
+  def system(cmd: String): Unit =
     Zone { implicit z =>
       val s = toCString(cmd)
 
-      libc.system(s)
+      libc.system(s) match {
+        case c if c != 0 => sys.error(s"command failed with exit code $c: $cmd")
+        case _           =>
+      }
     }
 
-  def interp(files: List[File]) = {
-    system(s"lli ${temp(generate(files, "z"), ".ll")}")
+  def interp(files: List[File]): Unit = {
+    system(s"lli ${temp(generate(files, ("z", null)), ".ll")}")
   }
 
-  def executable(out: File, files: List[File], opt: String) = {
+  def executable(out: File, files: List[File], opt: (String, String)): Unit = {
     val ll   = temp(generate(files, opt), ".ll").toString
     val name = ll.substring(0, ll.length - 3)
 
-    system(s"llc -O=1 --filetype=obj $ll")
+    system(s"llc -O=${if (opt != null && opt._2 != null) opt._2 else "1"} --filetype=obj $ll")
     system(s"gcc -no-pie ${name ++ ".o"} -o $out")
   }
 
