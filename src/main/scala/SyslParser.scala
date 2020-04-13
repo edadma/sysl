@@ -511,8 +511,8 @@ class SyslParser extends StandardTokenParsers with PackratParsers {
     sendExpression ~ "match" ~ partialFunctionExpression ^^ {
       case e ~ _ ~ f => ApplyExpressionAST(null, f, null, List((null, e)), false)
     } |
-      "if" ~> expression ~ ("then" ~> expressionOrBlock | blockExpression) ~ rep(elif) ~ elsePart ^^ {
-        case c ~ t ~ ei ~ e => ConditionalExpressionAST((c, t) +: ei, e)
+      "if" ~> pos ~ expression ~ ("then" ~> expressionOrBlock | blockExpression) ~ rep(elif) ~ elsePart ^^ {
+        case p ~ c ~ t ~ ei ~ e => ConditionalExpressionAST((p, c, t) +: ei, e)
       } |
       opt(ident <~ ":") ~ ("for" ~> generators) ~ ("do" ~> expressionOrBlock | blockExpression) ~ elsePart ^^ {
         case l ~ g ~ b ~ e => ForExpressionAST(l, g, b, e)
@@ -536,8 +536,8 @@ class SyslParser extends StandardTokenParsers with PackratParsers {
 
   lazy val elsePart: PackratParser[Option[ExpressionAST]] = opt(onl ~> "else" ~> expressionOrBlock)
 
-  lazy val elif = onl ~> "elif" ~> expression ~ ("then" ~> expressionOrBlock | blockExpression) ^^ {
-    case c ~ t => (c, t)
+  lazy val elif = onl ~> "elif" ~> pos ~ expression ~ ("then" ~> expressionOrBlock | blockExpression) ^^ {
+    case p ~ c ~ t => (p, c, t)
   }
 
   lazy val generator = (pattern <~ "<-") ~ pos ~ expression ~ opt((onl ~ "if") ~> logicalExpression) ^^ {

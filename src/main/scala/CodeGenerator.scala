@@ -1,5 +1,7 @@
 package xyz.hyperreal.sysl
 
+import scala.util.parsing.input.Position
+
 object CodeGenerator {
 
   def apply(as: List[SourceAST]) = {
@@ -13,6 +15,11 @@ object CodeGenerator {
     def indent(s: String) = {
       out ++= "  "
       line(s)
+    }
+
+    def position(pos: Position) = {
+      indent(s"; ${pos.line}:${pos.column}")
+      indent(s"; ${pos.longString.replace("\n", "\n  ; ")}")
     }
 
     def compileSource(src: SourceAST) = {
@@ -59,16 +66,28 @@ object CodeGenerator {
       def compileExpression(expr: ExpressionAST): Int = {
         expr match {
           case ConditionalExpressionAST(cond, els) =>
-            val truelabel  = labelName
-            val falselabel = labelName
-            val donelabel  = labelName
-            val condvalue  = compileExpression(cond.head._1)
+            val donelabel = labelName
 
-            indent(s"br i1 %$condvalue, label %$truelabel, label %$falselabel")
-            line(s"$truelabel:")
-            compileExpression(cond.head._2)
-            indent(s"br label %$donelabel")
-            line(s"$falselabel:")
+            def gencond(cs: Seq[(Position, ExpressionAST, ExpressionAST)]): Unit = {
+              val (pos, condexpr, trueexpr) = cs.head
+
+              val truelabel  = labelName
+              val falselabel = labelName
+
+              position(pos)
+              val condvalue = compileExpression(condexpr)
+
+              indent(s"br i1 %$condvalue, label %$truelabel, label %$falselabel")
+              line(s"$truelabel:")
+              compileExpression(trueexpr)
+              indent(s"br label %$donelabel")
+              line(s"$falselabel:")
+
+              if (cs.tail nonEmpty)
+                gencond(cs.tail)
+            }
+
+            gencond(cond)
             els foreach compileExpression
             indent(s"br label %$donelabel")
             line(s"$donelabel:")

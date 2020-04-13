@@ -72,7 +72,7 @@ case class XorExpressionAST(left: ExpressionAST, right: ExpressionAST) extends E
 case class AndExpressionAST(left: ExpressionAST, right: ExpressionAST) extends ExpressionAST
 case class NotExpressionAST(expr: ExpressionAST)                       extends ExpressionAST
 case class ConditionalExpressionAST(
-    cond: Seq[(ExpressionAST, ExpressionAST)],
+    cond: Seq[(Position, ExpressionAST, ExpressionAST)],
     els: Option[ExpressionAST]
 ) extends ExpressionAST
 case class WhileExpressionAST(
