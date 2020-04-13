@@ -46,14 +46,8 @@ object CodeGenerator {
       val parmset =
         parms map {
           case VariablePatternAST(pos, name) => name
-          case p                             => sys.error(s"pattern type not implemented yet: $p")
+          case p: PatternAST                 => problem(p.pos, s"pattern type not implemented yet: $p")
         } toSet
-
-//      def getParm(p: String) =
-//        parms indexWhere {
-//          case VariablePatternAST(pos, name) => name == p
-//          case p                             => sys.error(s"pattern type not implemented yet: $p")
-//        }
 
       def operation(s: String) = {
         indent(s"%${valueCounter.next} = $s")
@@ -172,9 +166,7 @@ object CodeGenerator {
         valueCounter.current
       }
 
-      val parmdef = parms map {
-        case VariablePatternAST(pos, name) => s"i32 %$name"
-      } mkString ", "
+      val parmdef = parms map { case VariablePatternAST(_, name) => s"i32 %$name" } mkString ", "
 
       line("define i32 @" ++ name ++ s"($parmdef) {")
       line("entry:")

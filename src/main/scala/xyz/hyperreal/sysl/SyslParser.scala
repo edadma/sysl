@@ -780,7 +780,7 @@ class SyslParser extends StandardTokenParsers with PackratParsers {
       typePattern
 
   lazy val typePattern: PackratParser[PatternAST] =
-    primaryPattern ~ (":" ~> ident) ^^ { case pat ~ typename => TypePatternAST(pat, typename) } |
+    primaryPattern ~ pos ~ (":" ~> ident) ^^ { case pat ~ p ~ typename => TypePatternAST(p, pat, typename) } |
       primaryPattern
 
   lazy val primaryPattern: PackratParser[PatternAST] =
