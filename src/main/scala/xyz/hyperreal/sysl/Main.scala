@@ -46,7 +46,7 @@ object Main extends App {
     opt[Unit]('r', "run")
       .action((_, c) => c.copy(run = true))
       .text("run bitcode interpreter")
-    opt[String]('O', "Opt")
+    opt[String]('O', "opt")
       .optional()
       .valueName("<level>")
       .action((x, c) => c.copy(opt = x))
@@ -55,8 +55,8 @@ object Main extends App {
           if (x.length == 1 && "0123sz".contains(x.head))
             success
           else
-            failure(s"Option --Opt should be one of 0, 1, 2, 3, s or z"))
-      .text("optional output file")
+            failure(s"Option --opt should be one of 0, 1, 2, 3, s or z"))
+      .text("optional optimization level")
     opt[File]('o', "out")
       .optional()
       .valueName("<output file>")
@@ -67,7 +67,7 @@ object Main extends App {
             success
           else
             failure(s"Option --out: can't write to $x"))
-      .text("optional executable output file")
+      .text("optional output file")
     version("version")
       .text("print the version")
       .abbr("v")
