@@ -12,7 +12,7 @@ nativeMode := "debug"
 
 nativeLinkingOptions := Seq( s"-L/${baseDirectory.value}/native-lib" )
 
-scalacOptions ++= Seq( "-deprecation", "-feature", "-unchecked", "-language:postfixOps", "-language:implicitConversions", "-language:existentials" )
+scalacOptions ++= Seq( "-deprecation", "-feature", "-unchecked", "-language:postfixOps", "-language:implicitConversions", "-language:existentials", "-Xmax-classfile-name", "128" )
 
 organization := "xyz.hyperreal"
 
