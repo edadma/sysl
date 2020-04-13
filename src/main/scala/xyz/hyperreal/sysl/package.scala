@@ -4,9 +4,9 @@ import scala.util.parsing.input.Position
 
 package object sysl {
 
-  def perror(msg: String) = problem(null, msg)
+  def perror(msg: String): Nothing = problem(null, msg)
 
-  def problem(pos: Position, error: String) = {
+  def problem(pos: Position, error: String): Nothing = {
     if (pos eq null)
       println(error)
     else

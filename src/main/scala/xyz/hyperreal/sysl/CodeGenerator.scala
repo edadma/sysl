@@ -1,28 +1,29 @@
 package xyz.hyperreal.sysl
 
+import scala.annotation.tailrec
 import scala.util.parsing.input.Position
 
 object CodeGenerator {
 
-  def apply(as: List[SourceAST]) = {
+  def apply(as: List[SourceAST]): String = {
     val out = new StringBuilder
 
-    def line(s: String) = {
+    def line(s: String): Unit = {
       out ++= s
       out += '\n'
     }
 
-    def indent(s: String) = {
+    def indent(s: String): Unit = {
       out ++= "  "
       line(s)
     }
 
-    def position(pos: Position) = {
+    def position(pos: Position): Unit = {
       indent(s"; ${pos.line}:${pos.column}")
       indent(s"; ${pos.longString.replace("\n", "\n  ; ")}")
     }
 
-    def compileSource(src: SourceAST) = {
+    def compileSource(src: SourceAST): Unit = {
       line("""@.number_str = private unnamed_addr constant [4 x i8] c"%d\0A\00", align 1""")
       line("declare i32 @printf(i8*, ...)")
       src.stmts foreach compileTopLevelStatement
@@ -31,7 +32,7 @@ object CodeGenerator {
     def compileTopLevelStatement(stmt: StatementAST): Unit =
       stmt match {
         case DeclarationBlockAST(decls) => decls foreach compileTopLevelStatement
-        case DefAST(dpos, name, FunctionPieceAST(ppos, parms, arb, parts, where)) =>
+        case DefAST(_, name, FunctionPieceAST(_, parms, arb, parts, where)) =>
           compileFunction(name, parms, arb, parts, where)
       }
 
@@ -39,9 +40,20 @@ object CodeGenerator {
                         parms: List[PatternAST],
                         arb: Boolean,
                         parts: List[FunctionPart],
-                        where: List[DeclarationStatementAST]) = {
+                        where: List[DeclarationStatementAST]): Unit = {
       val valueCounter = new Counter
       val blockCounter = new Counter
+      val parmset =
+        parms map {
+          case VariablePatternAST(pos, name) => name
+          case p                             => sys.error(s"pattern type not implemented yet: $p")
+        } toSet
+
+//      def getParm(p: String) =
+//        parms indexWhere {
+//          case VariablePatternAST(pos, name) => name == p
+//          case p                             => sys.error(s"pattern type not implemented yet: $p")
+//        }
 
       def operation(s: String) = {
         indent(s"%${valueCounter.next} = $s")
@@ -59,7 +71,7 @@ object CodeGenerator {
 
       def compileStatement(stmt: StatementAST): Unit =
         stmt match {
-          case t: DeclarationStatementAST =>
+          case _: DeclarationStatementAST =>
           case t: ExpressionAST           => compileExpression(t)
         }
 
@@ -68,6 +80,7 @@ object CodeGenerator {
           case ConditionalExpressionAST(cond, els) =>
             val donelabel = labelName
 
+            @tailrec
             def gencond(cs: Seq[(Position, ExpressionAST, ExpressionAST)]): Unit = {
               val (pos, condexpr, trueexpr) = cs.head
 
@@ -75,6 +88,7 @@ object CodeGenerator {
               val falselabel = labelName
 
               position(pos)
+
               val condvalue = compileExpression(condexpr)
 
               indent(s"br i1 %$condvalue, label %$truelabel, label %$falselabel")
@@ -131,21 +145,40 @@ object CodeGenerator {
             indent(
               s"store i32 (i8*, ...)* @printf, i32 (i8*, ...)** %${operation("alloca i32 (i8*, ...)*, align 8")}, align 8")
             operation(s"load i32 (i8*, ...)*, i32 (i8*, ...)** %${valueCounter.current}, align 8")
-//          case VariableExpressionAST(pos, name) =>
-//            indent(s"store i32 (i8*, ...)* @printf, i32 (i8*, ...)** %${operation("alloca i32, align 8")}, align 8")
-//            operation(s"load i32 (i8*, ...)*, i32 (i8*, ...)** %${counter.current}, align 8")
+          case VariableExpressionAST(pos, name) =>
+//            getParm(name) match {
+//              case -1 => problem(pos, s"parameter '$name' not found")
+//            }
+            if (parmset(name)) {
+              indent(s"store i32 %$name, i32* %${operation("alloca i32, align 4")}, align 4")
+              operation(s"load i32, i32* %${valueCounter.current}, align 4")
+            } else {
+              indent(
+                s"store i32 (i32, i32)* @$name, i32 (i32, i32)** %${operation("alloca i32 (i32, i32)*, align 8")}, align 8")
+              operation(s"load i32 (i32, i32)*, i32 (i32, i32)** %${valueCounter.current}, align 8")
+            }
           case ApplyExpressionAST(fpos, f @ VariableExpressionAST(_, "print"), apos, List((_, arg)), tailrecursive) =>
             operation(
               s"call i32 (i8*, ...) %${compileExpression(f)}(i8* getelementptr inbounds ([4 x i8], [4 x i8]* @.number_str, i64 0, i64 0), i32 %${compileExpression(arg)})")
+          case ApplyExpressionAST(fpos, f, apos, args, tailrecursive) =>
+            val func = compileExpression(f)
+            val argvals =
+              for ((_, a) <- args)
+                yield s"i32 %${compileExpression(a)}"
+
+            operation(s"call i32 (${Iterator.fill(args.length)("i32") mkString ", "}) %$func(${argvals mkString ", "})")
         }
 
         valueCounter.current
       }
 
-      line("define i32 @" ++ name ++ "() {")
+      val parmdef = parms map {
+        case VariablePatternAST(pos, name) => s"i32 %$name"
+      } mkString ", "
+
+      line("define i32 @" ++ name ++ s"($parmdef) {")
       line("entry:")
-      compileExpression(parts.head.body)
-      indent("ret i32 0")
+      indent(s"ret i32 %${compileExpression(parts.head.body)}")
       line("}")
     }
 
@@ -157,14 +190,14 @@ object CodeGenerator {
 
 class Counter {
 
-  var count = 0
+  private var count = 0
 
-  def next = {
+  def next: Int = {
     count += 1
     count - 1
   }
 
-  def current =
+  def current: Int =
     if (count == 0)
       sys.error("no last count")
     else

@@ -75,11 +75,6 @@ object Main extends App {
 
   optionsParser.parse(args, Options()) match {
     case Some(options) =>
-      /*if ((options.parser | options.gen | options.run) && options.out != null) {
-        optionsParser.showUsageAsError
-        optionsParser.reportError("Option --out is only for compiler output")
-        sys.exit(1)
-      } else*/
       if (options.parser) {
         val asl = parse(options.files).head
 
@@ -164,11 +159,11 @@ object Main extends App {
     system(s"gcc -no-pie ${name ++ ".o"} -o $out")
   }
 
-  def write(s: String, f: File) = {
+  def write(s: String, f: File): Unit = {
     val st = new PrintStream(new FileOutputStream(f))
 
     st.print(s)
-    st.close
+    st.close()
   }
 
   @native.extern

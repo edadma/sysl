@@ -7,13 +7,15 @@ import util.parsing.input.CharArrayReader.EofCh
 import util.parsing.input.{CharSequenceReader, Position, Positional, Reader}
 import xyz.hyperreal.indentation_lexical_native._
 
+import scala.util.matching.Regex
+
 object Interpolation {
-  val INTERPOLATION_PATTERN    = """\$(?:([a-zA-Z_]+\d*)|\{([^}]+)\}|\$)""" r
-  val INTERPOLATED_PATTERN     = """[\ue000-\ue002]([^\ue000-\ue002]+)""" r
-  val INTERPOLATION_DELIMITER  = '\ue000'
-  val INTERPOLATION_LITERAL    = '\ue000'
-  val INTERPOLATION_VARIABLE   = '\ue001'
-  val INTERPOLATION_EXPRESSION = '\ue002'
+  val INTERPOLATION_PATTERN: Regex = """\$(?:([a-zA-Z_]+\d*)|\{([^}]+)\}|\$)""" r
+  val INTERPOLATED_PATTERN: Regex  = """[\ue000-\ue002]([^\ue000-\ue002]+)""" r
+  val INTERPOLATION_DELIMITER      = '\ue000'
+  val INTERPOLATION_LITERAL        = '\ue000'
+  val INTERPOLATION_VARIABLE       = '\ue001'
+  val INTERPOLATION_EXPRESSION     = '\ue002'
 }
 
 class SyslLexical
@@ -30,7 +32,7 @@ class SyslLexical
 
   override def token: Parser[Token] = regexToken | stringToken | decimalToken | super.token
 
-  override def identChar = letter | elem('_') // | elem('$')
+  override def identChar: Parser[Elem] = letter | elem('_') // | elem('$')
 
   override def whitespace: Parser[Any] = rep[Any](
     whitespaceChar
@@ -42,28 +44,28 @@ class SyslLexical
   case class RegexLit(chars: String) extends Token
 
   private def regexToken: Parser[Token] =
-    '`' ~> rep(guard(not('`')) ~> (('\\' ~ '`' ^^^ "\\`") | elem("", ch => true))) <~ '`' ^^ { l =>
+    '`' ~> rep(guard(not('`')) ~> (('\\' ~ '`' ^^^ "\\`") | elem("", _ => true))) <~ '`' ^^ { l =>
       RegexLit(l mkString)
     }
 
   private def stringToken: Parser[Token] =
-    ('\'' ~ '\'' ~ '\'') ~> rep(guard(not('\'' ~ '\'' ~ '\'')) ~> elem("", ch => true)) <~ ('\'' ~ '\'' ~ '\'') ^^ {
-      l =>
-        StringLit(l mkString)
+    ('\'' ~ '\'' ~ '\'') ~> rep(guard(not('\'' ~ '\'' ~ '\'')) ~> elem("", _ => true)) <~ ('\'' ~ '\'' ~ '\'') ^^ { l =>
+      StringLit(l mkString)
     } |
-      ('"' ~ '"' ~ '"') ~> rep(guard(not('"' ~ '"' ~ '"')) ~> elem("", ch => true)) <~ ('"' ~ '"' ~ '"') ^^ { l =>
-        StringLit(interpolate(l mkString, false))
+      ('"' ~ '"' ~ '"') ~> rep(guard(not('"' ~ '"' ~ '"')) ~> elem("", _ => true)) <~ ('"' ~ '"' ~ '"') ^^ { l =>
+        StringLit(interpolate(l mkString, handleEscape = false))
       } |
-      '\'' ~> rep(guard(not('\'')) ~> (('\\' ~ '\'' ^^^ "\\'") | elem("", ch => true))) <~ '\'' ^^ { l =>
+      '\'' ~> rep(guard(not('\'')) ~> (('\\' ~ '\'' ^^^ "\\'") | elem("", _ => true))) <~ '\'' ^^ { l =>
         StringLit(escape(l mkString))
       } |
-      '"' ~> rep(guard(not('"')) ~> (('\\' ~ '"' ^^^ "\\\"") | elem("", ch => true))) <~ '"' ^^ { l =>
-        StringLit(interpolate(l mkString, true))
+      '"' ~> rep(guard(not('"')) ~> (('\\' ~ '"' ^^^ "\\\"") | elem("", _ => true))) <~ '"' ^^ { l =>
+        StringLit(interpolate(l mkString, handleEscape = true))
       }
 
   private def escape(s: String) = {
     val buf = new StringBuilder
 
+    @scala.annotation.tailrec
     def chr(r: Reader[Char]): Unit = {
       if (!r.atEnd) {
         if (r.first == '\\') {
@@ -127,7 +129,7 @@ class SyslLexical
       buf append s
     }
 
-    def literal(s: String) = append(INTERPOLATION_LITERAL, if (handleEscape) escape(s) else s)
+    def literal(s: String): Unit = append(INTERPOLATION_LITERAL, if (handleEscape) escape(s) else s)
 
     for (m <- INTERPOLATION_PATTERN.findAllMatchIn(s)) {
       if (m.start > last)
@@ -264,12 +266,12 @@ class SyslParser extends StandardTokenParsers with PackratParsers {
 
   override val lexical = new SyslLexical
 
-  def parse[T](grammar: PackratParser[T], r: Reader[Char]) = phrase(grammar)(lexical.read(r))
+  def parse[T](grammar: PackratParser[T], r: Reader[Char]): ParseResult[T] = phrase(grammar)(lexical.read(r))
 
-  def parseFromSource[T](src: io.Source, grammar: PackratParser[T]) =
+  def parseFromSource[T](src: io.Source, grammar: PackratParser[T]): T =
     parseFromString(src.mkString, grammar)
 
-  def parseFromString[T](src: String, grammar: PackratParser[T]) = {
+  def parseFromString[T](src: String, grammar: PackratParser[T]): T = {
     parse(grammar, new CharSequenceReader(src)) match {
       case Success(tree, _)       => tree
       case NoSuccess(error, rest) => problem(rest.pos, error)
@@ -281,11 +283,11 @@ class SyslParser extends StandardTokenParsers with PackratParsers {
   lazy val regexLit: Parser[String] =
     elem("regex literal", _.isInstanceOf[RegexLit]) ^^ (_.chars)
 
-  lazy val pos = positioned(success(new Positional {})) ^^ { _.pos }
+  lazy val pos: Parser[Position] = positioned(success(new Positional {})) ^^ { _.pos }
 
-  lazy val nl = rep1(Newline)
+  lazy val nl: Parser[List[lexical.Token]] = rep1(Newline)
 
-  lazy val onl = rep(Newline)
+  lazy val onl: Parser[List[lexical.Token]] = rep(Newline)
 
   lazy val number: PackratParser[Int] =
     numericLit ^^ (_.toInt)
@@ -314,7 +316,7 @@ class SyslParser extends StandardTokenParsers with PackratParsers {
     Newline ^^^ SourceAST(Nil) |
       rep1(topLevelStatement) ^^ SourceAST
 
-  lazy val statements = rep1(statement)
+  lazy val statements: Parser[List[StatementAST]] = rep1(statement)
 
   lazy val statement: PackratParser[StatementAST] =
     expressionStatement |
@@ -339,23 +341,24 @@ class SyslParser extends StandardTokenParsers with PackratParsers {
 
   lazy val directive: PackratParser[DirectiveStatementAST] = imports
 
-  lazy val imports =
+  lazy val imports: Parser[DirectiveBlockAST] =
     "import" ~> rep1sep(imprt, ",") ^^ DirectiveBlockAST |
       "import" ~> Indent ~> rep1(imprt <~ Newline) <~ Dedent ^^ DirectiveBlockAST
 
-  lazy val imprt = rep1sep(ident, ".") ~ "." ~ "{" ~ rep1sep(ident ~ opt("=>" ~> ident), ",") ~ "}" ^^ {
-    case m ~ _ ~ _ ~ e ~ _ =>
-      ImportAST(m, e map { case n ~ r => n -> r })
-  } |
-    ident ~ "." ~ rep1sep(ident, ".") ^^ {
-      case f ~ _ ~ n =>
-        val module = f +: n.init
-        val name   = n.last
+  lazy val imprt: Parser[ImportAST] =
+    rep1sep(ident, ".") ~ "." ~ "{" ~ rep1sep(ident ~ opt("=>" ~> ident), ",") ~ "}" ^^ {
+      case m ~ _ ~ _ ~ e ~ _ =>
+        ImportAST(m, e map { case n ~ r => n -> r })
+    } |
+      ident ~ "." ~ rep1sep(ident, ".") ^^ {
+        case f ~ _ ~ n =>
+          val module = f +: n.init
+          val name   = n.last
 
-        ImportAST(module, List((name, None)))
-    }
+          ImportAST(module, List((name, None)))
+      }
 
-  lazy val enums =
+  lazy val enums: Parser[DeclarationBlockAST] =
     "enum" ~> rep1sep(enum, ",") ^^ DeclarationBlockAST |
       "enum" ~> Indent ~> rep1(enum <~ Newline) <~ Dedent ^^ DeclarationBlockAST
 
