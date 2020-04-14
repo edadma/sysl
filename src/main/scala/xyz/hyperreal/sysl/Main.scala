@@ -14,11 +14,12 @@ object Main extends App {
       run: Boolean = false,
       files: List[File] = Nil,
       source: Boolean = false,
-      arch: String = null,
+      arch: (String, String) = null,
       out: File = null
   )
 
-  val optRegex = "([0-3sz])(?:,([1-3]))?" r
+  val optRegex  = "([0-3sz])(?:,([1-3]))?" r
+  val archRegex = "([a-z0-9]+),([a-z0-9]+)" r
 
   private val optionsParser = new scopt.OptionParser[Options]("sysl") {
     head("SysL Compiler", "v0.1.0")
@@ -36,8 +37,14 @@ object Main extends App {
       .text("source file(s) to compile (- refers to standard input)")
     opt[String]('a', "arch")
       .optional()
-      .valueName("<arch>[,<cpuname>]")
-      .action((x, c) => c.copy(arch = x))
+      .valueName("<arch>,<cpuname>")
+      .validate(
+        x =>
+          if (archRegex.pattern.matcher(x).matches)
+            success
+          else
+            failure(s"Option --arch argument should match ([a-z0-9]+),([a-z0-9]+)"))
+      .action((x, c) => c.copy(arch = x match { case archRegex(a, b) => (a, b) }))
       .text("target architecture")
     opt[Unit]('g', "gen")
       .action((_, c) => c.copy(gen = true))
