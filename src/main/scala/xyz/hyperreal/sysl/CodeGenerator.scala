@@ -37,6 +37,10 @@ object CodeGenerator {
         case DefAST(_, name, FunctionPieceAST(_, parms, arb, parts, where)) =>
           compileFunction(name, parms, arb, parts, where)
         case VarAST(pos, name, init) =>
+          globalVars get name match {
+            case Some(_) => problem(pos, s"duplicate variable definition")
+            case None    => globalVars(name) = VarDef(IntType, init)
+          }
       }
 
     def compileFunction(name: String,
