@@ -41,7 +41,6 @@ object CodeGenerator {
             case Some(_) => problem(pos, s"duplicate variable definition")
             case None =>
               globalVars(name) = VarDef(IntType, init)
-
           }
       }
 
@@ -186,9 +185,6 @@ object CodeGenerator {
     compileSource(as.head)
     out.toString
   }
-
-  abstract class Type
-  case object IntType extends Type
 
   abstract class Def { val typ: Type }
   case class VarDef(typ: Type, init: Any) extends Def

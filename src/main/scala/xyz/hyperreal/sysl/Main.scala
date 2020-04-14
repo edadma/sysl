@@ -128,7 +128,7 @@ object Main extends App {
     def parse(in: File) = {
       val parser = new SyslParser
 
-      parser.parseFromSource(sourceForFile(files.head), parser.source)
+      parser.parseFromSource(sourceForFile(in), parser.source)
     }
 
     files map parse
