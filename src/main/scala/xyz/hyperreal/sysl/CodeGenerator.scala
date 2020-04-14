@@ -1,12 +1,14 @@
 package xyz.hyperreal.sysl
 
 import scala.annotation.tailrec
+import scala.collection.mutable
 import scala.util.parsing.input.Position
 
 object CodeGenerator {
 
   def apply(as: List[SourceAST]): String = {
-    val out = new StringBuilder
+    val globalVars = new mutable.HashMap[String, VarDef]
+    val out        = new StringBuilder
 
     def line(s: String): Unit = {
       out ++= s
@@ -34,6 +36,7 @@ object CodeGenerator {
         case DeclarationBlockAST(decls) => decls foreach compileTopLevelStatement
         case DefAST(_, name, FunctionPieceAST(_, parms, arb, parts, where)) =>
           compileFunction(name, parms, arb, parts, where)
+        case VarAST(pos, name, init) =>
       }
 
     def compileFunction(name: String,
@@ -178,21 +181,27 @@ object CodeGenerator {
     out.toString
   }
 
-}
+  abstract class Type
+  case object IntType extends Type
 
-class Counter {
+  abstract class Def { val typ: Type }
+  case class VarDef(typ: Type, init: Any) extends Def
 
-  private var count = 0
+  class Counter {
 
-  def next: Int = {
-    count += 1
-    count - 1
-  }
+    private var count = 0
 
-  def current: Int =
-    if (count == 0)
-      sys.error("no last count")
-    else
+    def next: Int = {
+      count += 1
       count - 1
+    }
+
+    def current: Int =
+      if (count == 0)
+        sys.error("no last count")
+      else
+        count - 1
+
+  }
 
 }
