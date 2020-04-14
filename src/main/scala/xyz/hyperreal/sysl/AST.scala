@@ -19,7 +19,7 @@ case class EnumAST(name: String, pos: Position, enumeration: List[(String, Optio
 //case class NativeAST( pkg: String, name: List[(String, Option[String])] ) extends DeclarationStatementAST
 //case class FunctionAST( cls: String, name: List[(String, Option[String])] ) extends DeclarationStatementAST
 case class ValAST(pat: PatternAST, pos: Position, expr: ExpressionAST) extends DeclarationStatementAST
-case class VarAST(pos: Position, var name: String, init: Option[(Position, ExpressionAST)])
+case class VarAST(pos: Position, name: String, typ: Option[(Position, String)], init: Option[(Position, ExpressionAST)])
     extends DeclarationStatementAST
 case class DefAST(pos: Position, name: String, func: FunctionPieceAST) extends DeclarationStatementAST
 case class DeclarationBlockAST(decls: List[DeclarationStatementAST])   extends DeclarationStatementAST

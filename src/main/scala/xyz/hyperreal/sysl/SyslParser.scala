@@ -381,9 +381,11 @@ class SyslParser extends StandardTokenParsers with PackratParsers {
       "var" ~> Indent ~> rep1(variable <~ Newline) <~ Dedent ^^ DeclarationBlockAST
 
   lazy val variable =
-    pos ~ ident ~ opt("=" ~> pos ~ noAssignmentExpressionOrBlock) ^^ {
-      case p ~ n ~ None         => VarAST(p, n, None)
-      case p ~ n ~ Some(pe ~ e) => VarAST(p, n, Some((pe, e)))
+    pos ~ ident ~ opt(":" ~> pos ~ ident) ~ opt("=" ~> pos ~ noAssignmentExpressionOrBlock) ^^ {
+      case p ~ n ~ None ~ None                 => VarAST(p, n, None, None)
+      case p ~ n ~ None ~ Some(pe ~ e)         => VarAST(p, n, None, Some((pe, e)))
+      case p ~ n ~ Some(pt ~ t) ~ None         => VarAST(p, n, Some((pt, t)), None)
+      case p ~ n ~ Some(pt ~ t) ~ Some(pe ~ e) => VarAST(p, n, Some((pt, t)), Some((pe, e)))
     }
 
   lazy val constructor: PackratParser[(String, List[String])] =
@@ -780,7 +782,7 @@ class SyslParser extends StandardTokenParsers with PackratParsers {
       typePattern
 
   lazy val typePattern: PackratParser[PatternAST] =
-    primaryPattern ~ pos ~ (":" ~> ident) ^^ { case pat ~ p ~ typename => TypePatternAST(p, pat, typename) } |
+    primaryPattern ~ ":" ~ pos ~ ident ^^ { case pat ~ _ ~ p ~ typename => TypePatternAST(p, pat, typename) } |
       primaryPattern
 
   lazy val primaryPattern: PackratParser[PatternAST] =
