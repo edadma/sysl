@@ -13,6 +13,7 @@ object Main extends App {
       opt: (String, String) = null,
       run: Boolean = false,
       files: List[File] = Nil,
+      source: Boolean = false,
       arch: String = null,
       out: File = null
   )
@@ -40,14 +41,8 @@ object Main extends App {
       .text("target architecture")
     opt[Unit]('g', "gen")
       .action((_, c) => c.copy(gen = true))
-      .text("run code generator")
+      .text("output generated IR code")
     help("help").text("print this usage text").abbr("h")
-    opt[Unit]('p', "parse")
-      .action((_, c) => c.copy(parser = true))
-      .text("run parser")
-    opt[Unit]('r', "run")
-      .action((_, c) => c.copy(run = true))
-      .text("run bitcode interpreter")
     opt[String]('O', "opt")
       .optional()
       .valueName("<level>")
@@ -70,6 +65,15 @@ object Main extends App {
           else
             failure(s"Option --out: can't write to $x"))
       .text("optional output file")
+    opt[Unit]('p', "parse")
+      .action((_, c) => c.copy(parser = true))
+      .text("run parser")
+    opt[Unit]('r', "run")
+      .action((_, c) => c.copy(run = true))
+      .text("run bitcode interpreter")
+    opt[Unit]('s', "src")
+      .action((_, c) => c.copy(source = true))
+      .text("output generated machine code")
     version("version")
       .text("print the version")
       .abbr("v")
@@ -93,6 +97,13 @@ object Main extends App {
           println(code)
       } else if (options.run) {
         interp(options.files)
+      } else if (options.source) {
+        val code = source(options.files, options.opt)
+
+        if (options.out ne null)
+          write(code, options.out)
+        else
+          println(code)
       } else if (options.out ne null)
         executable(options.out, options.files, options.opt)
       else
@@ -100,7 +111,7 @@ object Main extends App {
     case None => sys.exit(1)
   }
 
-  def source(f: File) =
+  def sourceForFile(f: File) =
     if (f.toString == "-")
       io.Source.stdin
     else
@@ -110,10 +121,18 @@ object Main extends App {
     def parse(in: File) = {
       val parser = new SyslParser
 
-      parser.parseFromSource(source(files.head), parser.source)
+      parser.parseFromSource(sourceForFile(files.head), parser.source)
     }
 
     files map parse
+  }
+
+  def readFile(f: File) = {
+    val s   = io.Source.fromFile(f)
+    val res = s.mkString
+
+    s.close
+    res
   }
 
   def generate(files: List[File], opt: (String, String)) = {
@@ -126,12 +145,7 @@ object Main extends App {
       val r = File.createTempFile("sysl-opt-", ".ll")
 
       system(s"opt -S --O${opt._1} $f >$r")
-
-      val s   = io.Source.fromFile(r)
-      val res = s.mkString
-
-      s.close
-      res
+      readFile(r)
     }
   }
 
@@ -156,12 +170,20 @@ object Main extends App {
     system(s"lli ${temp(generate(files, ("z", null)), ".ll")}")
   }
 
-  def executable(out: File, files: List[File], opt: (String, String)): Unit = {
+  def llc(files: List[File], opt: (String, String), filetype: String) = {
     val ll   = temp(generate(files, opt), ".ll").toString
     val name = ll.substring(0, ll.length - 3)
 
-    system(s"llc -O=${if (opt != null && opt._2 != null) opt._2 else "1"} --filetype=obj $ll")
-    system(s"gcc -no-pie ${name ++ ".o"} -o $out")
+    system(s"llc -O=${if (opt != null && opt._2 != null) opt._2 else "1"} $filetype $ll")
+    name
+  }
+
+  def source(files: List[File], opt: (String, String)) = {
+    readFile(new File(llc(files, opt, "") ++ ".s"))
+  }
+
+  def executable(out: File, files: List[File], opt: (String, String)): Unit = {
+    system(s"gcc -no-pie ${llc(files, opt, "--filetype=obj") ++ ".o"} -o $out")
   }
 
   def write(s: String, f: File): Unit = {
