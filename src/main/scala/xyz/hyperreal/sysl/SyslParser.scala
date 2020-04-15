@@ -289,28 +289,28 @@ class SyslParser extends StandardTokenParsers with PackratParsers {
 
   lazy val onl: Parser[List[lexical.Token]] = rep(Newline)
 
-  lazy val number: PackratParser[Int] =
-    numericLit ^^ (_.toInt)
-//      (
-//          n =>
-//            if (n startsWith "0x") {
-//              val num = BigInt(n substring 2, 16)
-//
-//              if (num.isValidInt)
-//                num.intValue.asInstanceOf[Number]
-//              else
-//                num
-//            } else if (n matches ".*[.eE].*")
-//              n.toDouble.asInstanceOf[Number]
-//            else {
-//              val bi = BigInt(n)
-//
-//              if (bi.isValidInt)
-//                bi.intValue.asInstanceOf[Number]
-//              else
-//                bi
-//            }
-//      )
+  lazy val number: Parser[Number] =
+    numericLit ^^
+      (
+          n =>
+            if (n startsWith "0x") {
+              val num = BigInt(n substring 2, 16)
+
+              if (num.isValidInt)
+                num.intValue.asInstanceOf[Number]
+              else
+                num
+            } else if (n matches ".*[.eE].*")
+              n.toDouble.asInstanceOf[Number]
+            else {
+              val bi = BigInt(n)
+
+              if (bi.isValidInt)
+                bi.intValue.asInstanceOf[Number]
+              else
+                bi
+            }
+      )
 
   lazy val source: PackratParser[SourceAST] =
     Newline ^^^ SourceAST(Nil) |
@@ -766,7 +766,6 @@ class SyslParser extends StandardTokenParsers with PackratParsers {
             LiteralExpressionAST(s)
       } |
       ("true" | "false") ^^ (b => LiteralExpressionAST(b.toBoolean)) |
-      "(" ~ ")" ^^^ LiteralExpressionAST(()) |
       "null" ^^^ LiteralExpressionAST(null) |
       pos ~ ident ^^ { case p ~ n => VariableExpressionAST(p, n) } |
       "(" ~> expression <~ ")"

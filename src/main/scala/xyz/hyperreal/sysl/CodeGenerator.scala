@@ -211,9 +211,11 @@ object CodeGenerator {
 
             operation(s"$inst i32 %${compileExpression(left)}, %${compileExpression(right)}")
           case BlockExpressionAST(stmts) => stmts foreach compileStatement
-          case LiteralExpressionAST(v: Int) =>
-            indent(s"store i32 $v, i32* %${operation("alloca i32, align 4")}, align 4")
-            operation(s"load i32, i32* %${valueCounter.current}, align 4")
+          case LiteralExpressionAST(v: Any) =>
+            val Constant(value, typ) = literal(v)
+
+            indent(s"store $typ $value, i32* %${operation(s"alloca $typ")}")
+            operation(s"load $typ, $typ* %${valueCounter.current}")
           case VariableExpressionAST(pos, "print") =>
             indent(
               s"store i32 (i8*, ...)* @printf, i32 (i8*, ...)** %${operation("alloca i32 (i8*, ...)*, align 8")}, align 8")
