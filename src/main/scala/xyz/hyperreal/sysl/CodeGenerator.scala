@@ -149,114 +149,138 @@ object CodeGenerator {
         name
       }
 
-      def compileStatement(stmt: StatementAST): Unit =
+      def compileStatement(stmt: StatementAST) =
         stmt match {
-          case _: DeclarationStatementAST =>
-          case t: ExpressionAST           => compileExpression(t)
+          case _: DeclarationStatementAST => VoidType
+          case t: ExpressionAST           => compileExpression(t)._2
         }
 
-      def compileExpression(expr: ExpressionAST): Int = {
-        expr match {
-          case ConditionalExpressionAST(cond, els) =>
-            val donelabel = labelName
+      def compileExpression(expr: ExpressionAST): (Int, Type) = {
+        val typ =
+          expr match {
+            case ConditionalExpressionAST(cond, els) =>
+              val donelabel = labelName
 
-            @tailrec
-            def gencond(cs: Seq[(Position, ExpressionAST, ExpressionAST)]): Unit = {
-              val (pos, condexpr, trueexpr) = cs.head
+              @tailrec
+              def gencond(cs: Seq[(Position, ExpressionAST, ExpressionAST)]): Unit = {
+                val (pos, condexpr, trueexpr) = cs.head
 
-              val truelabel  = labelName
-              val falselabel = labelName
+                val truelabel  = labelName
+                val falselabel = labelName
 
-              position(pos)
+                position(pos)
 
-              val condvalue = compileExpression(condexpr)
+                val (condvalue, condtype) = compileExpression(condexpr)
 
-              indent(s"br i1 %$condvalue, label %$truelabel, label %$falselabel")
-              line(s"$truelabel:")
-              compileExpression(trueexpr)
-              indent(s"br label %$donelabel")
-              line(s"$falselabel:")
+                if (condtype != BoolType)
+                  problem(pos, s"expected expression of type Bool, found ${condtype.name}")
 
-              if (cs.tail nonEmpty)
-                gencond(cs.tail)
-            }
+                indent(s"br i1 %$condvalue, label %$truelabel, label %$falselabel")
+                line(s"$truelabel:")
+                compileExpression(trueexpr)
+                indent(s"br label %$donelabel")
+                line(s"$falselabel:")
 
-            gencond(cond)
-            els foreach compileExpression
-            indent(s"br label %$donelabel")
-            line(s"$donelabel:")
-          case WhileExpressionAST(lab, cond, body, els) =>
-            val begin  = label
-            val end    = labelName
-            val inside = labelName
-
-            indent(s"br i1 %${compileExpression(cond)}, label %$inside, label %$end")
-            line(s"$inside:")
-            body foreach compileExpression
-            indent(s"br label $begin")
-          case UnaryExpressionAST("+", pos, expr) => compileExpression(expr)
-          case UnaryExpressionAST("-", pos, expr) => operation(s"sub i32 0, %${compileExpression(expr)}")
-          case BinaryExpressionAST(lpos, left, op, rpos, right) =>
-            val inst =
-              op match {
-                case "+"   => "add"
-                case "-"   => "sub"
-                case "*"   => "mul"
-                case "/"   => "sdiv"
-                case "mod" => "srem"
-                case "=="  => "icmp eq"
-                case "!="  => "icmp ne"
-                case "<"   => "icmp slt"
-                case "<="  => "icmp sle"
-                case ">"   => "icmp sgt"
-                case ">="  => "icmp sge"
+                if (cs.tail nonEmpty)
+                  gencond(cs.tail)
               }
 
-            operation(s"$inst i32 %${compileExpression(left)}, %${compileExpression(right)}")
-          case BlockExpressionAST(stmts) => stmts foreach compileStatement
-          case LiteralExpressionAST(v: Any) =>
-            val Constant(value, typ) = literal(v)
+              gencond(cond)
+              els foreach compileExpression
+              indent(s"br label %$donelabel")
+              line(s"$donelabel:")
+              VoidType // todo: get type correctly by looking all posibilities
+            case WhileExpressionAST(lab, cond, body, els) =>
+              val begin  = label
+              val end    = labelName
+              val inside = labelName
 
-            indent(s"store $typ $value, i32* %${operation(s"alloca $typ")}")
-            operation(s"load $typ, $typ* %${valueCounter.current}")
-          case VariableExpressionAST(pos, "print") =>
-            indent(
-              s"store i32 (i8*, ...)* @printf, i32 (i8*, ...)** %${operation("alloca i32 (i8*, ...)*, align 8")}, align 8")
-            operation(s"load i32 (i8*, ...)*, i32 (i8*, ...)** %${valueCounter.current}, align 8")
-          case VariableExpressionAST(pos, name) =>
-            globalVars get name match {
-              case Some(VarDef(typ, _)) =>
-                operation(s"load $typ, $typ* @$name")
-              case None =>
-                if (parmset(name)) {
-                  indent(s"store i32 %$name, i32* %${operation("alloca i32, align 4")}, align 4")
-                  operation(s"load i32, i32* %${valueCounter.current}, align 4")
-                } else {
-                  indent(
-                    s"store i32 (i32, i32)* @$name, i32 (i32, i32)** %${operation("alloca i32 (i32, i32)*, align 8")}, align 8")
-                  operation(s"load i32 (i32, i32)*, i32 (i32, i32)** %${valueCounter.current}, align 8")
+              indent(s"br i1 %${compileExpression(cond)._1}, label %$inside, label %$end")
+              line(s"$inside:")
+              body foreach compileExpression
+              indent(s"br label $begin")
+              VoidType // todo: get type correctly by looking all while body
+            case UnaryExpressionAST("+", pos, expr) => compileExpression(expr)._2
+            case UnaryExpressionAST("-", pos, expr) =>
+              val (operand, typ) = compileExpression(expr)
+
+              operation(s"sub $typ 0, %$operand")
+              typ
+            case BinaryExpressionAST(lpos, left, op, rpos, right) =>
+              val inst =
+                op match {
+                  case "+"   => "add"
+                  case "-"   => "sub"
+                  case "*"   => "mul"
+                  case "/"   => "sdiv"
+                  case "mod" => "srem"
+                  case "=="  => "icmp eq"
+                  case "!="  => "icmp ne"
+                  case "<"   => "icmp slt"
+                  case "<="  => "icmp sle"
+                  case ">"   => "icmp sgt"
+                  case ">="  => "icmp sge"
                 }
-            }
-          case ApplyExpressionAST(fpos, f @ VariableExpressionAST(_, "print"), apos, List((_, arg)), tailrecursive) =>
-            operation(
-              s"call i32 (i8*, ...) %${compileExpression(f)}(i8* getelementptr inbounds ([4 x i8], [4 x i8]* @.number_str, i64 0, i64 0), i32 %${compileExpression(arg)})")
-          case ApplyExpressionAST(fpos, f, apos, args, tailrecursive) =>
-            val func = compileExpression(f)
-            val argvals =
-              for ((_, a) <- args)
-                yield s"i32 %${compileExpression(a)}"
+              val (l, tl) = compileExpression(left)
+              val (r, tr) = compileExpression(right)
 
-            operation(s"call i32 (${Iterator.fill(args.length)("i32") mkString ", "}) %$func(${argvals mkString ", "})")
-        }
+              operation(s"$inst $tl %$l, %$r") // todo: do this correctly by looking at both sides
+              tl
+            case BlockExpressionAST(stmts) =>
+              stmts.init foreach compileStatement
+              compileStatement(stmts.last)
+            case LiteralExpressionAST(v: Any) =>
+              val Constant(value, typ) = literal(v)
 
-        valueCounter.current
+              indent(s"store $typ $value, i32* %${operation(s"alloca $typ")}")
+              operation(s"load $typ, $typ* %${valueCounter.current}")
+              typ
+            case VariableExpressionAST(pos, "print") =>
+              indent(
+                s"store i32 (i8*, ...)* @printf, i32 (i8*, ...)** %${operation("alloca i32 (i8*, ...)*, align 8")}, align 8")
+              operation(s"load i32 (i8*, ...)*, i32 (i8*, ...)** %${valueCounter.current}, align 8")
+              PointerType(FunctionType(IntType, List(PointerType(ByteType)), arb = true))
+            case VariableExpressionAST(pos, name) =>
+              globalVars get name match {
+                case Some(VarDef(typ, _)) =>
+                  operation(s"load $typ, $typ* @$name")
+                  typ
+                case None =>
+                  if (parmset(name)) {
+                    indent(s"store i32 %$name, i32* %${operation("alloca i32, align 4")}, align 4")
+                    operation(s"load i32, i32* %${valueCounter.current}, align 4")
+                    IntType // todo: parameters
+                  } else {
+                    indent(
+                      s"store i32 (i32, i32)* @$name, i32 (i32, i32)** %${operation("alloca i32 (i32, i32)*, align 8")}, align 8")
+                    operation(s"load i32 (i32, i32)*, i32 (i32, i32)** %${valueCounter.current}, align 8")
+                    IntType // todo: functions
+                  }
+              }
+            case ApplyExpressionAST(fpos, f @ VariableExpressionAST(_, "print"), apos, List((_, arg)), tailrecursive) =>
+              operation(
+                s"call i32 (i8*, ...) %${compileExpression(f)._1}(i8* getelementptr inbounds ([4 x i8], [4 x i8]* @.number_str, i64 0, i64 0), i32 %${compileExpression(
+                  arg)._1})")
+              IntType
+            case ApplyExpressionAST(fpos, f, apos, args, tailrecursive) =>
+              val (func, ftyp) = compileExpression(f)
+              val argvals =
+                for ((_, a) <- args)
+                  yield s"i32 %${compileExpression(a)._1}"
+
+              operation(
+                s"call i32 (${Iterator.fill(args.length)("i32") mkString ", "}) %$func(${argvals mkString ", "})")
+              IntType // function call
+          }
+
+        (valueCounter.current, typ)
       }
 
       val parmdef = parms map { case VariablePatternAST(_, name) => s"i32 %$name" } mkString ", "
 
       line("define i32 @" ++ name ++ s"($parmdef) {")
       line("entry:")
-      indent(s"ret i32 %${compileExpression(parts.head.body)}")
+      indent(s"ret i32 %${compileExpression(parts.head.body)._1}")
       line("}")
     }
 
