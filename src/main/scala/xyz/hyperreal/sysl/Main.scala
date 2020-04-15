@@ -175,7 +175,7 @@ object Main extends App {
     }
 
   def interp(files: List[File]): Unit = {
-    system(s"lli ${temp(generate(files, ("z", null)), ".ll")}")
+    system(s"lli ${temp(generate(files, ("z", null)), ".ll")}", Some(1))
   }
 
   def llc(files: List[File], opt: (String, String), filetype: String) = {

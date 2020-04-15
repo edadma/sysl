@@ -192,28 +192,24 @@ object CodeGenerator {
             body foreach compileExpression
             indent(s"br label $begin")
           case UnaryExpressionAST("+", pos, expr) => compileExpression(expr)
-          case UnaryExpressionAST("-", pos, expr) =>
-            operation(s"sub i32 0, %${compileExpression(expr)}")
-          case BinaryExpressionAST(lpos, left, "+", rpos, right) =>
-            operation(s"add i32 %${compileExpression(left)}, %${compileExpression(right)}")
-          case BinaryExpressionAST(lpos, left, "-", rpos, right) =>
-            operation(s"sub i32 %${compileExpression(left)}, %${compileExpression(right)}")
-          case BinaryExpressionAST(lpos, left, "*", rpos, right) =>
-            operation(s"mul i32 %${compileExpression(left)}, %${compileExpression(right)}")
-          case BinaryExpressionAST(lpos, left, "/", rpos, right) =>
-            operation(s"sdiv i32 %${compileExpression(left)}, %${compileExpression(right)}")
-          case ComparisonExpressionAST(lpos, left, List(("==", rpos, right))) =>
-            operation(s"icmp eq i32 %${compileExpression(left)}, %${compileExpression(right)}")
-          case ComparisonExpressionAST(lpos, left, List(("!=", rpos, right))) =>
-            operation(s"icmp ne i32 %${compileExpression(left)}, %${compileExpression(right)}")
-          case ComparisonExpressionAST(lpos, left, List((">", rpos, right))) =>
-            operation(s"icmp sgt i32 %${compileExpression(left)}, %${compileExpression(right)}")
-          case ComparisonExpressionAST(lpos, left, List((">=", rpos, right))) =>
-            operation(s"icmp sge i32 %${compileExpression(left)}, %${compileExpression(right)}")
-          case ComparisonExpressionAST(lpos, left, List(("<", rpos, right))) =>
-            operation(s"icmp slt i32 %${compileExpression(left)}, %${compileExpression(right)}")
-          case ComparisonExpressionAST(lpos, left, List(("<=", rpos, right))) =>
-            operation(s"icmp sle i32 %${compileExpression(left)}, %${compileExpression(right)}")
+          case UnaryExpressionAST("-", pos, expr) => operation(s"sub i32 0, %${compileExpression(expr)}")
+          case BinaryExpressionAST(lpos, left, op, rpos, right) =>
+            val inst =
+              op match {
+                case "+"   => "add"
+                case "-"   => "sub"
+                case "*"   => "mul"
+                case "/"   => "sdiv"
+                case "mod" => "srem"
+                case "=="  => "icmp eq"
+                case "!="  => "icmp ne"
+                case "<"   => "icmp slt"
+                case "<="  => "icmp sle"
+                case ">"   => "icmp sgt"
+                case ">="  => "icmp sge"
+              }
+
+            operation(s"$inst i32 %${compileExpression(left)}, %${compileExpression(right)}")
           case BlockExpressionAST(stmts) => stmts foreach compileStatement
           case LiteralExpressionAST(v: Int) =>
             indent(s"store i32 $v, i32* %${operation("alloca i32, align 4")}, align 4")
@@ -223,9 +219,6 @@ object CodeGenerator {
               s"store i32 (i8*, ...)* @printf, i32 (i8*, ...)** %${operation("alloca i32 (i8*, ...)*, align 8")}, align 8")
             operation(s"load i32 (i8*, ...)*, i32 (i8*, ...)** %${valueCounter.current}, align 8")
           case VariableExpressionAST(pos, name) =>
-//            getParm(name) match {
-//              case -1 => problem(pos, s"parameter '$name' not found")
-//            }
             globalVars get name match {
               case Some(VarDef(typ, _)) =>
                 operation(s"load $typ, $typ* @$name")
