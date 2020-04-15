@@ -31,18 +31,93 @@ object CodeGenerator {
       src.stmts foreach compileTopLevelStatement
     }
 
+    def typeFromString(typ: String) =
+      typ match {
+        case "Int"    => IntType
+        case "Long"   => LongType
+        case "Double" => DoubleType
+        case "Char"   => CharType
+      }
+
     def compileTopLevelStatement(stmt: StatementAST): Unit =
       stmt match {
         case DeclarationBlockAST(decls) => decls foreach compileTopLevelStatement
         case DefAST(_, name, FunctionPieceAST(_, parms, arb, parts, where)) =>
           compileFunction(name, parms, arb, parts, where)
-        case VarAST(pos, name, typ, init) =>
+        case VarAST(pos, name, None, init) => // todo: variable type
           globalVars get name match {
             case Some(_) => problem(pos, s"duplicate variable definition")
             case None =>
-              globalVars(name) = VarDef(IntType, init)
+              val const =
+                init match {
+                  case None              => Constant(0, IntType)
+                  case Some((pos, expr)) => eval(pos, expr)
+                }
+              globalVars(name) = VarDef(const.typ, const)
+              line(s"@$name = global ${const.typ} ${const.value}")
           }
       }
+
+    def literal(v: Any) =
+      v match {
+        case a: Int    => Constant(a, IntType)
+        case a: Char   => Constant(a, CharType)
+        case a: Double => Constant(a, DoubleType)
+      }
+
+    def eval(pos: Position, expr: ExpressionAST): Constant = {
+      def numeric(expr: ExpressionAST) =
+        eval(pos, expr) match {
+          case r @ Constant(_, _: NumericType) => r
+          case _                               => problem(pos, "none numeric type")
+        }
+
+      expr match {
+        case LiteralExpressionAST(v: Int)     => literal(v)
+        case UnaryExpressionAST("+", _, expr) => numeric(expr)
+        case UnaryExpressionAST("-", _, expr) =>
+          numeric(expr) match {
+            case Constant(value: Int, typ)    => Constant(-value, typ)
+            case Constant(value: Long, typ)   => Constant(-value, typ)
+            case Constant(value: Char, _)     => Constant(-value, IntType)
+            case Constant(value: Double, typ) => Constant(-value, typ)
+          }
+        case UnaryExpressionAST(op, _, _) => problem(pos, s"invalid unary operator: '$op'")
+        case BinaryExpressionAST(lpos, left, op, rpos, right) =>
+          val l = numeric(left)
+          val r = numeric(right)
+          val (l1, r1) =
+            (l, r) match {
+              case _ if l.typ == r.typ                              => (l, r)
+              case (Constant(_: Double, tl), Constant(vr: Long, _)) => (l, Constant(vr.toDouble, tl))
+              case (Constant(vl: Long, _), Constant(_: Double, tr)) => (Constant(vl.toDouble, tr), r)
+              case (Constant(_: Long, tl), Constant(vr: Int, _))    => (l, Constant(vr.toLong, tl))
+              case (Constant(vl: Int, _), Constant(_: Long, tr))    => (Constant(vl.toLong, tr), r)
+              case (Constant(_: Double, tl), Constant(vr: Int, _))  => (l, Constant(vr.toDouble, tl))
+              case (Constant(vl: Int, _), Constant(_: Double, tr))  => (Constant(vl.toDouble, tr), r)
+              case (Constant(_: Int, tl), Constant(vr: Char, _))    => (l, Constant(vr.toInt, tl))
+              case (Constant(vl: Char, _), Constant(_: Int, tr))    => (Constant(vl.toInt, tr), r)
+            }
+
+          (l1, op, r1) match {
+            case (Constant(a: Int, t), "+", Constant(b: Int, _))       => Constant(a + b, t)
+            case (Constant(a: Int, t), "-", Constant(b: Int, _))       => Constant(a - b, t)
+            case (Constant(a: Int, t), "*", Constant(b: Int, _))       => Constant(a * b, t)
+            case (Constant(a: Int, t), "/", Constant(b: Int, _))       => Constant(a / b, t)
+            case (Constant(a: Int, t), "%", Constant(b: Int, _))       => Constant(a % b, t)
+            case (Constant(a: Long, t), "+", Constant(b: Long, _))     => Constant(a + b, t)
+            case (Constant(a: Long, t), "-", Constant(b: Long, _))     => Constant(a - b, t)
+            case (Constant(a: Long, t), "*", Constant(b: Long, _))     => Constant(a * b, t)
+            case (Constant(a: Long, t), "/", Constant(b: Long, _))     => Constant(a / b, t)
+            case (Constant(a: Long, t), "%", Constant(b: Long, _))     => Constant(a % b, t)
+            case (Constant(a: Double, t), "+", Constant(b: Double, _)) => Constant(a + b, t)
+            case (Constant(a: Double, t), "-", Constant(b: Double, _)) => Constant(a - b, t)
+            case (Constant(a: Double, t), "*", Constant(b: Double, _)) => Constant(a * b, t)
+            case (Constant(a: Double, t), "/", Constant(b: Double, _)) => Constant(a / b, t)
+          }
+        case _ => problem(pos, s"initializer not compile-time constant")
+      }
+    }
 
     def compileFunction(name: String,
                         parms: List[PatternAST],
@@ -151,13 +226,18 @@ object CodeGenerator {
 //            getParm(name) match {
 //              case -1 => problem(pos, s"parameter '$name' not found")
 //            }
-            if (parmset(name)) {
-              indent(s"store i32 %$name, i32* %${operation("alloca i32, align 4")}, align 4")
-              operation(s"load i32, i32* %${valueCounter.current}, align 4")
-            } else {
-              indent(
-                s"store i32 (i32, i32)* @$name, i32 (i32, i32)** %${operation("alloca i32 (i32, i32)*, align 8")}, align 8")
-              operation(s"load i32 (i32, i32)*, i32 (i32, i32)** %${valueCounter.current}, align 8")
+            globalVars get name match {
+              case Some(VarDef(typ, _)) =>
+                operation(s"load $typ, $typ* @$name")
+              case None =>
+                if (parmset(name)) {
+                  indent(s"store i32 %$name, i32* %${operation("alloca i32, align 4")}, align 4")
+                  operation(s"load i32, i32* %${valueCounter.current}, align 4")
+                } else {
+                  indent(
+                    s"store i32 (i32, i32)* @$name, i32 (i32, i32)** %${operation("alloca i32 (i32, i32)*, align 8")}, align 8")
+                  operation(s"load i32 (i32, i32)*, i32 (i32, i32)** %${valueCounter.current}, align 8")
+                }
             }
           case ApplyExpressionAST(fpos, f @ VariableExpressionAST(_, "print"), apos, List((_, arg)), tailrecursive) =>
             operation(
@@ -187,7 +267,7 @@ object CodeGenerator {
   }
 
   abstract class Def { val typ: Type }
-  case class VarDef(typ: Type, init: Any) extends Def
+  case class VarDef(typ: Type, init: Constant) extends Def
 
   class Counter {
 

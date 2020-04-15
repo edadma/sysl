@@ -1,12 +1,14 @@
 package xyz.hyperreal.sysl
 
-abstract class Type { def llvm: String }
+abstract class Type
 
-abstract class SimpleType(val llvm: String) extends Type
+abstract class SimpleType(override val toString: String) extends Type
 
 case object VoidType extends SimpleType("void")
 
-abstract class IntegerType(llvm: String, val signed: Boolean) extends SimpleType(llvm)
+abstract class NumericType(llvm: String) extends SimpleType(llvm)
+
+abstract class IntegerType(llvm: String, val signed: Boolean) extends NumericType(llvm)
 case object ByteType                                          extends IntegerType("i8", signed = true)
 case object ShortType                                         extends IntegerType("i16", signed = true)
 case object IntType                                           extends IntegerType("i32", signed = true)
@@ -17,14 +19,16 @@ case object UIntType                                          extends IntegerTyp
 case object ULongType                                         extends IntegerType("i64", signed = false)
 case object CharType                                          extends IntegerType("i32", signed = false)
 
+//abstract class AnyIntType extends Type { def llvm: String = sys.error("internal type") }
+
 case object BoolType extends SimpleType("i1")
 
-abstract class FloatType(llvm: String) extends SimpleType(llvm)
+abstract class FloatType(llvm: String) extends NumericType(llvm)
 case object SingleType                 extends FloatType("float")
 case object DoubleType                 extends FloatType("double")
 case object QuadrupleType              extends FloatType("fp128")
 
-abstract class DerivedType(val llvm: String) extends Type { val typ: Type }
+abstract class DerivedType(override val toString: String) extends Type { val typ: Type }
 
 case class ArrayType(size: Int, typ: Type) extends DerivedType(s"[$size x $typ]")
 

@@ -163,13 +163,14 @@ object Main extends App {
     f
   }
 
-  def system(cmd: String): Unit =
+  def system(cmd: String, fail: Option[Int] = None): Unit =
     Zone { implicit z =>
       val s = toCString(cmd)
 
       libc.system(s) match {
-        case c if c != 0 => sys.error(s"command failed with exit code $c: $cmd")
-        case _           =>
+        case c if fail.isEmpty && c != 0 || fail.isDefined && c == fail.get =>
+          sys.error(s"command failed with exit code $c: $cmd")
+        case _ =>
       }
     }
 

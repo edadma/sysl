@@ -1,0 +1,5 @@
+var a = 123
+
+def main
+    print(a)
+    0
