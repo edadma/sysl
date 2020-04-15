@@ -60,9 +60,12 @@ object CodeGenerator {
 
     def literal(v: Any) =
       v match {
-        case a: Int    => Constant(a, IntType)
-        case a: Char   => Constant(a, CharType)
-        case a: Double => Constant(a, DoubleType)
+        case null       => Constant(0, PointerType(VoidType))
+        case a: Int     => Constant(a, IntType)
+        case a: Long    => Constant(a, LongType)
+        case a: Char    => Constant(a, CharType)
+        case a: Double  => Constant(a, DoubleType)
+        case a: Boolean => Constant(a, BoolType)
       }
 
     def eval(pos: Position, expr: ExpressionAST): Constant = {
