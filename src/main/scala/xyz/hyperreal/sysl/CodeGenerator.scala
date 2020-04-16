@@ -26,7 +26,8 @@ object CodeGenerator {
     }
 
     def compileSource(src: SourceAST): Unit = {
-      line("""@.number_str = private unnamed_addr constant [4 x i8] c"%d\0A\00", align 1""")
+      line("""@.int.format = private unnamed_addr constant [4 x i8] c"%d\0A\00", align 1""")
+      line("""@.double.format = private unnamed_addr constant [4 x i8] c"%f\0A\00", align 1""")
       line("declare i32 @printf(i8*, ...)")
       src.stmts foreach compileTopLevelStatement
     }
@@ -232,14 +233,9 @@ object CodeGenerator {
             case LiteralExpressionAST(v: Any) =>
               val Constant(value, typ) = literal(v)
 
-              indent(s"store $typ $value, i32* %${operation(s"alloca $typ")}")
+              indent(s"store $typ $value, $typ* %${operation(s"alloca $typ")}")
               operation(s"load $typ, $typ* %${valueCounter.current}")
               typ
-            case VariableExpressionAST(pos, "print") =>
-              indent(
-                s"store i32 (i8*, ...)* @printf, i32 (i8*, ...)** %${operation("alloca i32 (i8*, ...)*, align 8")}, align 8")
-              operation(s"load i32 (i8*, ...)*, i32 (i8*, ...)** %${valueCounter.current}, align 8")
-              PointerType(FunctionType(IntType, List(PointerType(ByteType)), arb = true))
             case VariableExpressionAST(pos, name) =>
               globalVars get name match {
                 case Some(VarDef(typ, _)) =>
@@ -257,11 +253,23 @@ object CodeGenerator {
                     IntType // todo: functions
                   }
               }
-            case ApplyExpressionAST(fpos, f @ VariableExpressionAST(_, "print"), apos, List((_, arg)), tailrecursive) =>
-              operation(
-                s"call i32 (i8*, ...) %${compileExpression(f)._1}(i8* getelementptr inbounds ([4 x i8], [4 x i8]* @.number_str, i64 0, i64 0), i32 %${compileExpression(
-                  arg)._1})")
-              IntType
+            case ApplyExpressionAST(fpos, VariableExpressionAST(_, "print"), apos, List((_, arg)), tailrecursive) =>
+              val (a, at) = compileExpression(arg)
+
+              indent(
+                s"store i32 (i8*, ...)* @printf, i32 (i8*, ...)** %${operation("alloca i32 (i8*, ...)*, align 8")}, align 8")
+              operation(s"load i32 (i8*, ...)*, i32 (i8*, ...)** %${valueCounter.current}, align 8")
+
+              at match {
+                case IntType =>
+                  operation(
+                    s"call i32 (i8*, ...) %${valueCounter.current}(i8* getelementptr inbounds ([4 x i8], [4 x i8]* @.int.format, i64 0, i64 0), i32 %$a)")
+                case DoubleType =>
+                  operation(
+                    s"call i32 (i8*, ...) %${valueCounter.current}(i8* getelementptr inbounds ([4 x i8], [4 x i8]* @.double.format, i64 0, i64 0), double %$a)")
+              }
+
+              VoidType
             case ApplyExpressionAST(fpos, f, apos, args, tailrecursive) =>
               val (func, ftyp) = compileExpression(f)
               val argvals =
