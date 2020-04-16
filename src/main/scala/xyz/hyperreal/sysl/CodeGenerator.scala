@@ -29,7 +29,8 @@ object CodeGenerator {
       line("""@.int.format = private unnamed_addr constant [4 x i8] c"%d\0A\00", align 1""")
       line("""@.double.format = private unnamed_addr constant [4 x i8] c"%f\0A\00", align 1""")
       line("declare i32 @printf(i8*, ...)")
-      src.stmts foreach compileTopLevelStatement
+      src.stmts foreach compileTopLevelStatementPass1
+      src.stmts foreach compileTopLevelStatementPass2
     }
 
     def typeFromString(typ: String) =
@@ -40,11 +41,11 @@ object CodeGenerator {
         case "Char"   => CharType
       }
 
-    def compileTopLevelStatement(stmt: StatementAST): Unit =
+    def compileTopLevelStatementPass1(stmt: StatementAST): Unit =
       stmt match {
-        case DeclarationBlockAST(decls) => decls foreach compileTopLevelStatement
+        case DeclarationBlockAST(decls) => decls foreach compileTopLevelStatementPass1
         case DefAST(_, name, FunctionPieceAST(_, parms, arb, parts, where)) =>
-          compileFunction(name, parms, arb, parts, where)
+          globalDefs(name) = FunctionDef(FunctionType(IntType, parms map (_ => IntType), arb))
         case VarAST(pos, name, None, init) => // todo: variable type
           globalDefs get name match {
             case Some(_) => problem(pos, s"duplicate definition for '$name''")
@@ -54,9 +55,19 @@ object CodeGenerator {
                   case None              => (0, IntType)
                   case Some((pos, expr)) => eval(pos, expr)
                 }
-              globalDefs(name) = VarDef(typ)
-              line(s"@$name = global $typ $const")
+              globalDefs(name) = VarDef(typ, const)
           }
+      }
+
+    def compileTopLevelStatementPass2(stmt: StatementAST): Unit =
+      stmt match {
+        case DeclarationBlockAST(decls) => decls foreach compileTopLevelStatementPass2
+        case DefAST(_, name, FunctionPieceAST(_, parms, arb, parts, where)) =>
+          compileFunction(name, parms, arb, parts, where)
+        case VarAST(pos, name, None, init) =>
+          val VarDef(typ, const) = globalDefs(name).asInstanceOf[VarDef]
+
+          line(s"@$name = global $typ $const")
       }
 
     def literal(v: Any) =
@@ -261,13 +272,14 @@ object CodeGenerator {
               typ
             case VariableExpressionAST(pos, name) =>
               globalDefs get name match {
-                case Some(VarDef(typ)) =>
+                case Some(VarDef(typ, _)) =>
                   operation(s"load $typ, $typ* @$name")
                   typ
-                case Some(FunctionType(ret, parms, arb)) => //FunctionDef
+                case Some(FunctionDef(func @ FunctionType(ret, parms, arb))) => //FunctionDef
                   indent(s"store $ret (${parms mkString ","})* @$name, $ret (${parms mkString ","})** %${operation(
                     s"alloca $ret(${parms mkString ","})*, align 8")}, align 8")
-                  operation(s"load i32 (i32, i32)*, i32 (i32, i32)** %${valueCounter.current}, align 8")
+                  operation(
+                    s"load $ret(${parms mkString ","})*, $ret(${parms mkString ","})** %${valueCounter.current}, align 8")
                   FunctionType(IntType, List(IntType, IntType))
                 case None =>
                   if (parmset(name)) {
@@ -331,7 +343,8 @@ object CodeGenerator {
   }
 
   abstract class Def { val typ: Type }
-  case class VarDef(typ: Type) extends Def
+  case class VarDef(typ: Type, const: Any)  extends Def
+  case class FunctionDef(typ: FunctionType) extends Def
 
   class Counter {
 
