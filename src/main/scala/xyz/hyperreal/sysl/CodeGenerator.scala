@@ -7,7 +7,7 @@ import scala.util.parsing.input.Position
 object CodeGenerator {
 
   def apply(as: List[SourceAST]): String = {
-    val globalVars = new mutable.HashMap[String, VarDef]
+    val globalDefs = new mutable.HashMap[String, Def]
     val out        = new StringBuilder
 
     def line(s: String): Unit = {
@@ -46,15 +46,15 @@ object CodeGenerator {
         case DefAST(_, name, FunctionPieceAST(_, parms, arb, parts, where)) =>
           compileFunction(name, parms, arb, parts, where)
         case VarAST(pos, name, None, init) => // todo: variable type
-          globalVars get name match {
-            case Some(_) => problem(pos, s"duplicate variable definition")
+          globalDefs get name match {
+            case Some(_) => problem(pos, s"duplicate definition for '$name''")
             case None =>
               val (const, typ) =
                 init match {
                   case None              => (0, IntType)
                   case Some((pos, expr)) => eval(pos, expr)
                 }
-              globalVars(name) = VarDef(typ)
+              globalDefs(name) = VarDef(typ)
               line(s"@$name = global $typ $const")
           }
       }
@@ -260,20 +260,22 @@ object CodeGenerator {
               operation(s"load $typ, $typ* %${valueCounter.current}")
               typ
             case VariableExpressionAST(pos, name) =>
-              globalVars get name match {
+              globalDefs get name match {
                 case Some(VarDef(typ)) =>
                   operation(s"load $typ, $typ* @$name")
                   typ
+                case Some(FunctionType(ret, parms, arb)) => //FunctionDef
+                  indent(s"store $ret (${parms mkString ","})* @$name, $ret (${parms mkString ","})** %${operation(
+                    s"alloca $ret(${parms mkString ","})*, align 8")}, align 8")
+                  operation(s"load i32 (i32, i32)*, i32 (i32, i32)** %${valueCounter.current}, align 8")
+                  FunctionType(IntType, List(IntType, IntType))
                 case None =>
                   if (parmset(name)) {
                     indent(s"store i32 %$name, i32* %${operation("alloca i32, align 4")}, align 4")
                     operation(s"load i32, i32* %${valueCounter.current}, align 4")
                     IntType // todo: parameters
                   } else {
-                    indent(
-                      s"store i32 (i32, i32)* @$name, i32 (i32, i32)** %${operation("alloca i32 (i32, i32)*, align 8")}, align 8")
-                    operation(s"load i32 (i32, i32)*, i32 (i32, i32)** %${valueCounter.current}, align 8")
-                    IntType // todo: functions
+                    problem(pos, s"unknown identifier: $name")
                   }
               }
             case ApplyExpressionAST(fpos, VariableExpressionAST(_, "print"), apos, List((_, arg)), tailrecursive) =>
@@ -295,13 +297,22 @@ object CodeGenerator {
               VoidType
             case ApplyExpressionAST(fpos, f, apos, args, tailrecursive) =>
               val (func, ftyp) = compileExpression(f)
+              val rtyp =
+                ftyp match {
+                  case FunctionType(ret, parms, arb) => ret
+                  case a                             => problem(fpos, s"expected function type: $a")
+                }
               val argvals =
-                for ((_, a) <- args)
-                  yield s"i32 %${compileExpression(a)._1}"
+                for ((p, a) <- args)
+                  yield {
+                    val (e, t) = compileExpression(a)
+
+                    s"$t %$e"
+                  }
 
               operation(
-                s"call i32 (${Iterator.fill(args.length)("i32") mkString ", "}) %$func(${argvals mkString ", "})")
-              IntType // function call
+                s"call $rtyp (${Iterator.fill(args.length)("i32") mkString ", "}) %$func(${argvals mkString ", "})")
+              rtyp
           }
 
         (valueCounter.current, typ)
