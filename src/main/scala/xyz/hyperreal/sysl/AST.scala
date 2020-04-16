@@ -112,6 +112,7 @@ case class InterpolationExpressionAST(l: List[ExpressionAST])                   
 case class FunctionExpressionAST(pieces: List[FunctionPieceAST])                                 extends ExpressionAST
 case class FunctionPieceAST(
     pos: Position,
+    ret: Option[(Position, String)],
     parms: List[PatternAST],
     arb: Boolean,
     parts: List[FunctionPart],

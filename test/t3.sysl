@@ -1,6 +1,6 @@
-def main
+def main: Int
     print(sum(3, 4, 5))
 
-def add(a, b) = a + b
+def sum(a: Int, b: Int, c: Int): Int = add(a, add(b, c))
 
-def sum(a, b, c) = add(a, add(b, c))
+def add(a: Int, b: Int): Int = a + b

@@ -399,11 +399,13 @@ class SyslParser extends StandardTokenParsers with PackratParsers {
       "def" ~> Indent ~> rep1(definition <~ Newline) <~ Dedent ^^ DeclarationBlockAST
 
   lazy val definition: PackratParser[DefAST] =
-    pos ~ ident ~ opt("(" ~> rep1sep(pattern, ",") ~ opt("...") <~ ")") ~ (optionallyGuardedPart | guardedParts) ^^ {
-      case p ~ n ~ None ~ ((gs, w)) =>
-        DefAST(p, n, FunctionPieceAST(p, Nil, arb = false, gs, w))
-      case p ~ n ~ Some(parms ~ a) ~ ((gs, w)) =>
-        DefAST(p, n, FunctionPieceAST(p, parms, a isDefined, gs, w))
+    pos ~ ident ~ opt("(" ~> rep1sep(pattern, ",") ~ opt("...") <~ ")") ~ opt(":" ~> pos ~ ident ^^ {
+      case p ~ i => (p, i)
+    }) ~ (optionallyGuardedPart | guardedParts) ^^ {
+      case p ~ n ~ None ~ r ~ ((gs, w)) =>
+        DefAST(p, n, FunctionPieceAST(p, r, Nil, arb = false, gs, w))
+      case p ~ n ~ Some(parms ~ a) ~ r ~ ((gs, w)) =>
+        DefAST(p, n, FunctionPieceAST(p, r, parms, a isDefined, gs, w))
     }
 
   lazy val optionallyGuardedPart: PackratParser[(List[FunctionPart], List[DeclarationStatementAST])] =
@@ -446,7 +448,7 @@ class SyslParser extends StandardTokenParsers with PackratParsers {
   lazy val whereDefinition: PackratParser[DeclarationStatementAST] =
     pos ~ ident ~ ("(" ~> (rep1sep(pattern, ",") ~ opt("...")) <~ ")") ~ (optionallyGuardedPart | guardedParts) ^^ {
       case p ~ n ~ (parms ~ a) ~ ((gs, w)) =>
-        DefAST(p, n, FunctionPieceAST(p, parms, a isDefined, gs, w))
+        DefAST(p, n, FunctionPieceAST(p, None, parms, a isDefined, gs, w))
     } |
       constant
 
@@ -588,6 +590,7 @@ class SyslParser extends StandardTokenParsers with PackratParsers {
       case p ~ ((parms, a)) ~ g ~ b =>
         FunctionPieceAST(
           p,
+          None,
           parms,
           a,
           List(FunctionPart(g, b.getOrElse(LiteralExpressionAST(())))),
@@ -795,9 +798,9 @@ class SyslParser extends StandardTokenParsers with PackratParsers {
         case p ~ n ~ l => RecordPatternAST(p, n, l)
       } |
       pos ~ ident ^^ { case p ~ n => VariablePatternAST(p, n) } |
-//      pos ~ ("(" ~> pattern <~ ",") ~ (rep1sep(pattern, ",") <~ ")") ^^ {
-//        case p ~ e ~ l => TuplePatternAST(p, e +: l)
-//      } |
+      pos ~ ("(" ~> pattern <~ ",") ~ (rep1sep(pattern, ",") <~ ")") ^^ {
+        case p ~ e ~ l => TuplePatternAST(p, e +: l)
+      } |
       "(" ~> pattern <~ ")"
 }
 

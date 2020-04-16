@@ -44,8 +44,10 @@ object CodeGenerator {
     def compileTopLevelStatementPass1(stmt: StatementAST): Unit =
       stmt match {
         case DeclarationBlockAST(decls) => decls foreach compileTopLevelStatementPass1
-        case DefAST(_, name, FunctionPieceAST(_, parms, arb, parts, where)) =>
-          globalDefs(name) = FunctionDef(FunctionType(IntType, parms map (_ => IntType), arb))
+        case DefAST(_, name, FunctionPieceAST(_, ret, parms, arb, parts, where)) =>
+          globalDefs(name) = FunctionDef(FunctionType(typeFromString(ret.get._2), parms map {
+            case TypePatternAST(_, _, typename) => typeFromString(typename)
+          }, arb))
         case VarAST(pos, name, None, init) => // todo: variable type
           globalDefs get name match {
             case Some(_) => problem(pos, s"duplicate definition for '$name''")
@@ -62,8 +64,8 @@ object CodeGenerator {
     def compileTopLevelStatementPass2(stmt: StatementAST): Unit =
       stmt match {
         case DeclarationBlockAST(decls) => decls foreach compileTopLevelStatementPass2
-        case DefAST(_, name, FunctionPieceAST(_, parms, arb, parts, where)) =>
-          compileFunction(name, parms, arb, parts, where)
+        case DefAST(_, name, FunctionPieceAST(_, ret, parms, arb, parts, where)) =>
+          compileFunction(name, ret, parms, arb, parts, where)
         case VarAST(pos, name, None, init) =>
           val VarDef(typ, const) = globalDefs(name).asInstanceOf[VarDef]
 
@@ -135,17 +137,19 @@ object CodeGenerator {
     }
 
     def compileFunction(name: String,
+                        ret: Option[(Position, String)],
                         parms: List[PatternAST],
                         arb: Boolean,
                         parts: List[FunctionPart],
                         where: List[DeclarationStatementAST]): Unit = {
       val valueCounter = new Counter
       val blockCounter = new Counter
-      val parmset =
-        parms map {
-          case VariablePatternAST(pos, name) => name
-          case p: PatternAST                 => problem(p.pos, s"pattern type not implemented yet: $p")
-        } toSet
+      val parmMap =
+        mutable.HashMap[String, Type](parms map {
+          case VariablePatternAST(pos, name)                                 => name -> null
+          case TypePatternAST(tpos, VariablePatternAST(pos, name), typename) => name -> typeFromString(typename)
+          case p: PatternAST                                                 => problem(p.pos, s"pattern type not implemented yet: $p")
+        }: _*)
 
       def operation(s: String) = {
         indent(s"%${valueCounter.next} = $s")
@@ -275,19 +279,20 @@ object CodeGenerator {
                 case Some(VarDef(typ, _)) =>
                   operation(s"load $typ, $typ* @$name")
                   typ
-                case Some(FunctionDef(func @ FunctionType(ret, parms, arb))) => //FunctionDef
+                case Some(FunctionDef(func @ FunctionType(ret, parms, arb))) =>
                   indent(s"store $ret (${parms mkString ","})* @$name, $ret (${parms mkString ","})** %${operation(
                     s"alloca $ret(${parms mkString ","})*, align 8")}, align 8")
                   operation(
                     s"load $ret(${parms mkString ","})*, $ret(${parms mkString ","})** %${valueCounter.current}, align 8")
                   FunctionType(IntType, List(IntType, IntType))
                 case None =>
-                  if (parmset(name)) {
-                    indent(s"store i32 %$name, i32* %${operation("alloca i32, align 4")}, align 4")
-                    operation(s"load i32, i32* %${valueCounter.current}, align 4")
-                    IntType // todo: parameters
-                  } else {
-                    problem(pos, s"unknown identifier: $name")
+                  parmMap get name match {
+                    case Some(typ) =>
+                      indent(s"store $typ %$name, $typ* %${operation(s"alloca $typ")}")
+                      operation(s"load $typ, $typ* %${valueCounter.current}")
+                      typ
+                    case None =>
+                      problem(pos, s"unknown identifier: $name")
                   }
               }
             case ApplyExpressionAST(fpos, VariableExpressionAST(_, "print"), apos, List((_, arg)), tailrecursive) =>
