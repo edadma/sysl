@@ -145,7 +145,7 @@ object CodeGenerator {
       val valueCounter = new Counter
       val blockCounter = new Counter
       val parmMap =
-        mutable.HashMap[String, Type](parms map {
+        mutable.LinkedHashMap[String, Type](parms map {
           case VariablePatternAST(pos, name)                                 => name -> null
           case TypePatternAST(tpos, VariablePatternAST(pos, name), typename) => name -> typeFromString(typename)
           case p: PatternAST                                                 => problem(p.pos, s"pattern type not implemented yet: $p")
@@ -335,11 +335,13 @@ object CodeGenerator {
         (valueCounter.current, typ)
       }
 
-      val parmdef = parms map { case VariablePatternAST(_, name) => s"i32 %$name" } mkString ", "
-
-      line("define i32 @" ++ name ++ s"($parmdef) {")
+      line(
+        s"define ${typeFromString(ret.get._2)} @" ++ name ++ s"(${parmMap map { case (k, v) => s"$v %$k" } mkString ", "}) {")
       line("entry:")
-      indent(s"ret i32 %${compileExpression(parts.head.body)._1}")
+
+      val (v, t) = compileExpression(parts.head.body)
+
+      indent(s"ret $t %$v") // todo: convert 't' to 'ret'
       line("}")
     }
 
