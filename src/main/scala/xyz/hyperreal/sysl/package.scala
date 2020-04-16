@@ -15,6 +15,6 @@ package object sysl {
     sys.exit(1)
   }
 
-  case class Constant(value: Any, typ: Type)
+  case class Const(value: Any, typ: Type)
 
 }
