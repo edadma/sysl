@@ -168,7 +168,7 @@ object CodeGenerator {
       def compileStatement(stmt: StatementAST) =
         stmt match {
           case _: DeclarationStatementAST => VoidType
-          case t: ExpressionAST           => compileExpression(false, t)._2
+          case t: ExpressionAST           => compileExpression(true, t)._2
         }
 
       def compileBinaryExpression(lpos: Position,
@@ -176,8 +176,8 @@ object CodeGenerator {
                                   op: String,
                                   rpos: Position,
                                   right: ExpressionAST) = {
-        val (l, tl) = compileExpression(false, left)
-        val (r, tr) = compileExpression(false, right)
+        val (l, tl) = compileExpression(true, left)
+        val (r, tr) = compileExpression(true, right)
         val (rt, ol, or) =
           (tl, tr) match {
             case _ if tl == tr                             => (tl, l, r)
@@ -220,7 +220,7 @@ object CodeGenerator {
         rt
       }
 
-      def compileExpression(lvalue: Boolean, expr: ExpressionAST): (Int, Type) = {
+      def compileExpression(rvalue: Boolean, expr: ExpressionAST): (Int, Type) = {
         val typ =
           expr match {
             case ConditionalExpressionAST(cond, els) =>
@@ -236,7 +236,7 @@ object CodeGenerator {
 
                 position(pos)
 
-                val (condvalue, condtype) = compileExpression(false, condexpr)
+                val (condvalue, condtype) = compileExpression(true, condexpr)
 
                 if (condtype != BoolType)
                   problem(pos, s"expected expression of type Bool, found ${condtype.name}")
@@ -244,7 +244,7 @@ object CodeGenerator {
                 indent(s"br i1 %$condvalue, label %$truelabel, label %$falselabel")
                 line(s"$truelabel:")
 
-                val trueval = compileExpression(lvalue, trueexpr)
+                val trueval = compileExpression(rvalue, trueexpr)
 
                 indent(s"br label %$donelabel")
                 line(s"$falselabel:")
@@ -259,7 +259,7 @@ object CodeGenerator {
               val (falseval, falsetyp) =
                 els match {
                   case None    => (0, VoidType)
-                  case Some(e) => compileExpression(lvalue, e)
+                  case Some(e) => compileExpression(rvalue, e)
                 }
 
               indent(s"br label %$donelabel")
@@ -272,14 +272,14 @@ object CodeGenerator {
               val end    = labelName
               val inside = labelName
 
-              indent(s"br i1 %${compileExpression(false, cond)._1}, label %$inside, label %$end")
+              indent(s"br i1 %${compileExpression(true, cond)._1}, label %$inside, label %$end")
               line(s"$inside:")
-              body foreach (compileExpression(false, _))
+              body foreach (compileExpression(true, _))
               indent(s"br label $begin")
               VoidType // todo: get type correctly by looking all while body
-            case UnaryExpressionAST("+", pos, expr) => compileExpression(false, expr)._2
+            case UnaryExpressionAST("+", pos, expr) => compileExpression(true, expr)._2
             case UnaryExpressionAST("-", pos, expr) =>
-              val (operand, typ) = compileExpression(false, expr)
+              val (operand, typ) = compileExpression(true, expr)
 
               operation(s"sub $typ 0, %$operand")
               typ
@@ -317,7 +317,7 @@ object CodeGenerator {
                   }
               }
             case ApplyExpressionAST(fpos, VariableExpressionAST(_, "print"), apos, List((_, arg)), tailrecursive) =>
-              val (a, at) = compileExpression(false, arg)
+              val (a, at) = compileExpression(true, arg)
 
               indent(
                 s"store i32 (i8*, ...)* @printf, i32 (i8*, ...)** %${operation("alloca i32 (i8*, ...)*, align 8")}, align 8")
@@ -334,7 +334,7 @@ object CodeGenerator {
 
               VoidType
             case ApplyExpressionAST(fpos, f, apos, args, tailrecursive) =>
-              val (func, ftyp) = compileExpression(false, f)
+              val (func, ftyp) = compileExpression(true, f)
               val rtyp =
                 ftyp match {
                   case FunctionType(ret, parms, arb) => ret
@@ -343,7 +343,7 @@ object CodeGenerator {
               val argvals =
                 for ((p, a) <- args)
                   yield {
-                    val (e, t) = compileExpression(false, a)
+                    val (e, t) = compileExpression(true, a)
 
                     s"$t %$e"
                   }
@@ -363,7 +363,7 @@ object CodeGenerator {
         s"define ${typeFromString(ret.get._2)} @" ++ name ++ s"(${parmMap map { case (k, v) => s"$v %$k" } mkString ", "}) {")
       line("entry:")
 
-      val (v, t) = compileExpression(parts.head.body)
+      val (v, t) = compileExpression(true, parts.head.body)
 
       indent(if (t == VoidType) "ret void" else s"ret $t %$v") // todo: convert 't' (expression type) to 'ret' (function's declared type)
       line("}")
