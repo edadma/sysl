@@ -182,7 +182,7 @@ object Main extends App {
     val ll   = temp(generate(files, opt), ".ll").toString
     val name = ll.substring(0, ll.length - 3)
 
-    system(s"llc -O=${if (opt != null && opt._2 != null) opt._2 else "1"} $filetype $ll")
+    system(s"llc -O=${if (opt != null && opt._2 != null) opt._2 else "1"} $filetype $ll") // -march=mips -mcpu=mips2
     name
   }
 

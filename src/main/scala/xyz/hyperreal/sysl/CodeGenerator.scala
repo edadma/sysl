@@ -33,7 +33,7 @@ object CodeGenerator {
       src.stmts foreach compileTopLevelStatementPass2
     }
 
-    def typeFromString(typ: String) =
+    def typeFromString(typ: String): Type =
       typ match {
         case "Int"    => IntType
         case "Long"   => LongType
@@ -72,7 +72,7 @@ object CodeGenerator {
           line(s"@$name = global $typ $const")
       }
 
-    def literal(v: Any) =
+    def literal(v: Any): (Any, Type) =
       v match {
         case null       => (0, PointerType(VoidType))
         case a: Int     => (a, IntType)
