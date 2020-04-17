@@ -227,7 +227,8 @@ object CodeGenerator {
               val donelabel = labelName
 
               @tailrec
-              def gencond(cs: Seq[(Position, ExpressionAST, ExpressionAST)]): Unit = {
+              def gencond(cs: Seq[(Position, ExpressionAST, ExpressionAST)],
+                          truelist: List[(String, (Int, Type))]): (List[(String, (Int, Type))], String) = {
                 val (pos, condexpr, trueexpr) = cs.head
 
                 val truelabel  = labelName
@@ -242,25 +243,30 @@ object CodeGenerator {
 
                 indent(s"br i1 %$condvalue, label %$truelabel, label %$falselabel")
                 line(s"$truelabel:")
-                compileExpression(trueexpr)
+
+                val trueval = compileExpression(trueexpr)
+
                 indent(s"br label %$donelabel")
                 line(s"$falselabel:")
 
                 if (cs.tail nonEmpty)
-                  gencond(cs.tail)
+                  gencond(cs.tail, truelist :+ (truelabel, trueval))
+                else
+                  (truelist :+ (truelabel, trueval), falselabel)
               }
 
-              gencond(cond)
-
-              val t =
+              val (truelist, falselabel) = gencond(cond, Nil)
+              val (falseval, falsetyp) =
                 els match {
-                  case None    => VoidType
-                  case Some(e) => compileExpression(e)._2
+                  case None    => (0, VoidType)
+                  case Some(e) => compileExpression(e)
                 }
 
               indent(s"br label %$donelabel")
               line(s"$donelabel:")
-              t // todo: get type correctly by looking all posibilities
+              operation(
+                s"phi $falsetyp ${truelist map { case (truelabel, (trueval, _)) => s"[ %$trueval, %$truelabel ]" } mkString ", "}, [ %$falseval, %$falselabel ]")
+              falsetyp // todo: get type correctly by looking all types
             case WhileExpressionAST(lab, cond, body, els) =>
               val begin  = label
               val end    = labelName
