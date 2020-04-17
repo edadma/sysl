@@ -319,10 +319,10 @@ object CodeGenerator {
               at match {
                 case IntType =>
                   operation(
-                    s"call i32 (i8*, ...) %${valueCounter.current}(i8* getelementptr inbounds ([4 x i8], [4 x i8]* @.int.format, i64 0, i64 0), i32 %$a)")
+                    s"call i32 (i8*, ...) %${valueCounter.current} (i8* getelementptr inbounds ([4 x i8], [4 x i8]* @.int.format, i64 0, i64 0), i32 %$a)")
                 case DoubleType =>
                   operation(
-                    s"call i32 (i8*, ...) %${valueCounter.current}(i8* getelementptr inbounds ([4 x i8], [4 x i8]* @.double.format, i64 0, i64 0), double %$a)")
+                    s"call i32 (i8*, ...) %${valueCounter.current} (i8* getelementptr inbounds ([4 x i8], [4 x i8]* @.double.format, i64 0, i64 0), double %$a)")
               }
 
               VoidType
@@ -342,7 +342,7 @@ object CodeGenerator {
                   }
 
               operation(
-                s"call $rtyp (${Iterator.fill(args.length)("i32") mkString ", "}) %$func(${argvals mkString ", "})")
+                s"call $rtyp (${Iterator.fill(args.length)("i32") mkString ", "}) %$func (${argvals mkString ", "})")
               rtyp
             case ComparisonExpressionAST(lpos, left, List((comp, rpos, right))) =>
               compileBinaryExpression(lpos, left, comp, rpos, right)
@@ -358,7 +358,7 @@ object CodeGenerator {
 
       val (v, t) = compileExpression(parts.head.body)
 
-      indent(s"ret $t %$v") // todo: convert 't' to 'ret'
+      indent(if (t == VoidType) "ret void" else s"ret $t %$v") // todo: convert 't' (expression type) to 'ret' (function's declared type)
       line("}")
     }
 
