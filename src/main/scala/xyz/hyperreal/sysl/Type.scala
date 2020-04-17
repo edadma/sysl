@@ -4,7 +4,10 @@ abstract class Type { val name: String }
 
 abstract class SimpleType(override val toString: String, val name: String) extends Type
 
-case object VoidType extends SimpleType("void", "Void")
+// todo: better Unit type
+case object UnitType extends SimpleType("i32", "Unit") {
+  val void = "1234567890"
+}
 
 abstract class NumericType(llvm: String, name: String) extends SimpleType(llvm, name)
 

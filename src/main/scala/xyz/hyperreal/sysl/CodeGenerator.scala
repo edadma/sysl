@@ -26,8 +26,10 @@ object CodeGenerator {
     }
 
     def compileSource(src: SourceAST): Unit = {
-      line("""@.int.format = private unnamed_addr constant [4 x i8] c"%d\0A\00", align 1""")
-      line("""@.double.format = private unnamed_addr constant [4 x i8] c"%f\0A\00", align 1""")
+      line("""@.int.format = private unnamed_addr constant [3 x i8] c"%d\00", align 1""")
+      line("""@.double.format = private unnamed_addr constant [3 x i8] c"%f\00", align 1""")
+      line("""@.nl.format = private unnamed_addr constant [2 x i8] c"\0A\00", align 1""")
+      line("""@.comma.format = private unnamed_addr constant [3 x i8] c", \00", align 1""")
       line("declare i32 @printf(i8*, ...)")
       src.stmts foreach compileTopLevelStatementPass1
       src.stmts foreach compileTopLevelStatementPass2
@@ -74,7 +76,7 @@ object CodeGenerator {
 
     def literal(v: Any): (Any, Type) =
       v match {
-        case null       => (0, PointerType(VoidType))
+        case null       => (0, PointerType(UnitType))
         case a: Int     => (a, IntType)
         case a: Long    => (a, LongType)
         case a: Char    => (a, CharType)
@@ -169,7 +171,7 @@ object CodeGenerator {
 
       def compileStatement(stmt: StatementAST) =
         stmt match {
-          case _: DeclarationStatementAST => VoidType
+          case _: DeclarationStatementAST => UnitType
           case t: ExpressionAST           => compileExpression(true, t)._2
         }
 
@@ -260,7 +262,7 @@ object CodeGenerator {
               val (truelist, falselabel) = gencond(cond, Nil)
               val (falseval, falsetyp) =
                 els match {
-                  case None    => (0, VoidType)
+                  case None    => (0, UnitType)
                   case Some(e) => compileExpression(rvalue, e)
                 }
 
@@ -278,7 +280,7 @@ object CodeGenerator {
               line(s"$inside:")
               body foreach (compileExpression(true, _))
               indent(s"br label $begin")
-              VoidType // todo: get type correctly by looking all while body
+              UnitType // todo: get type correctly by looking all while body
             case UnaryExpressionAST("+", pos, expr) => compileExpression(true, expr)._2
             case UnaryExpressionAST("-", pos, expr) =>
               val (operand, typ) = compileExpression(true, expr)
@@ -312,30 +314,46 @@ object CodeGenerator {
                 case None =>
                   parmMap get name match {
                     case Some(typ) =>
-                      indent(s"store $typ %$name, $typ* %${operation(s"alloca $typ")}")
+                      indent(s"store $typ %$name, $typ* ${operation(s"alloca $typ")}")
                       operation(s"load $typ, $typ* $valueCounter")
                       typ
                     case None =>
                       problem(pos, s"unknown identifier: $name")
                   }
               }
-            case ApplyExpressionAST(fpos, VariableExpressionAST(_, "print"), apos, List((_, arg)), tailrecursive) =>
-              val (a, at) = compileExpression(true, arg)
-
+            case ApplyExpressionAST(fpos, VariableExpressionAST(_, "print"), apos, args, tailrecursive) =>
               indent(
                 s"store i32 (i8*, ...)* @printf, i32 (i8*, ...)** ${operation("alloca i32 (i8*, ...)*, align 8")}, align 8")
-              operation(s"load i32 (i8*, ...)*, i32 (i8*, ...)** $valueCounter, align 8")
+              val printf = operation(s"load i32 (i8*, ...)*, i32 (i8*, ...)** $valueCounter, align 8")
 
-              at match {
-                case IntType =>
-                  operation(
-                    s"call i32 (i8*, ...) $valueCounter (i8* getelementptr inbounds ([4 x i8], [4 x i8]* @.int.format, i64 0, i64 0), i32 $a)")
-                case DoubleType =>
-                  operation(
-                    s"call i32 (i8*, ...) $valueCounter (i8* getelementptr inbounds ([4 x i8], [4 x i8]* @.double.format, i64 0, i64 0), double $a)")
-              }
+              @scala.annotation.tailrec
+              def printargs(args: List[(Position, ExpressionAST)]): Unit =
+                args match {
+                  case Nil =>
+                  case (pos, arg) :: tl =>
+                    val (a, at) = compileExpression(true, arg)
 
-              VoidType
+                    at match {
+                      case IntType =>
+                        operation(
+                          s"call i32 (i8*, ...) $printf (i8* getelementptr inbounds ([3 x i8], [3 x i8]* @.int.format, i64 0, i64 0), i32 $a)")
+                      case DoubleType =>
+                        operation(
+                          s"call i32 (i8*, ...) $printf (i8* getelementptr inbounds ([3 x i8], [3 x i8]* @.double.format, i64 0, i64 0), double $a)")
+                      case _ => problem(pos, "don't know how to print that (yet)")
+                    }
+
+                    if (tl nonEmpty)
+                      operation(
+                        s"call i32 (i8*, ...) $printf (i8* getelementptr inbounds ([3 x i8], [3 x i8]* @.comma.format, i64 0, i64 0))")
+
+                    printargs(tl)
+                }
+
+              printargs(args)
+              operation(
+                s"call i32 (i8*, ...) $printf (i8* getelementptr inbounds ([2 x i8], [2 x i8]* @.nl.format, i64 0, i64 0))")
+              UnitType
             case ApplyExpressionAST(fpos, f, apos, args, tailrecursive) =>
               val (func, ftyp) = compileExpression(true, f)
               val rtyp =
@@ -359,7 +377,7 @@ object CodeGenerator {
               BoolType
           }
 
-        (expval, typ)
+        (if (typ == UnitType) UnitType.void else expval, typ)
       }
 
       line(
@@ -368,7 +386,7 @@ object CodeGenerator {
 
       val (v, t) = compileExpression(true, parts.head.body)
 
-      indent(if (t == VoidType) "ret void" else s"ret $t $v") // todo: convert 't' (expression type) to 'ret' (function's declared type)
+      indent(if (t == UnitType) "ret void" else s"ret $t $v") // todo: convert 't' (expression type) to 'ret' (function's declared type)
       line("}")
     }
 
