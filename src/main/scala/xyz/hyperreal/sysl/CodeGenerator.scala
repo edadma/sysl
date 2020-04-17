@@ -48,16 +48,16 @@ object CodeGenerator {
           globalDefs(name) = FunctionDef(FunctionType(typeFromString(ret.get._2), parms map {
             case TypePatternAST(_, _, typename) => typeFromString(typename)
           }, arb))
-        case VarAST(pos, name, None, init) => // todo: variable type
+        case VarAST(pos, name, Some(dtyp), init) => // todo: variable type
           globalDefs get name match {
             case Some(_) => problem(pos, s"duplicate definition for '$name''")
             case None =>
               val (const, typ) =
                 init match {
-                  case None              => (0, IntType)
+                  case None              => (0, typeFromString(dtyp._2))
                   case Some((pos, expr)) => eval(pos, expr)
                 }
-              globalDefs(name) = VarDef(typ, const)
+              globalDefs(name) = VarDef(typ, const) // todo: actual type should be declared, with possible conversion
           }
       }
 
@@ -66,7 +66,7 @@ object CodeGenerator {
         case DeclarationBlockAST(decls) => decls foreach compileTopLevelStatementPass2
         case DefAST(_, name, FunctionPieceAST(_, ret, parms, arb, parts, where)) =>
           compileFunction(name, ret, parms, arb, parts, where)
-        case VarAST(pos, name, None, init) =>
+        case VarAST(pos, name, _, _) =>
           val VarDef(typ, const) = globalDefs(name).asInstanceOf[VarDef]
 
           line(s"@$name = global $typ $const")
@@ -121,12 +121,12 @@ object CodeGenerator {
             case ((a: Int, t), "-", (b: Int, _))       => (a - b, t)
             case ((a: Int, t), "*", (b: Int, _))       => (a * b, t)
             case ((a: Int, t), "/", (b: Int, _))       => (a / b, t)
-            case ((a: Int, t), "%", (b: Int, _))       => (a % b, t)
+            case ((a: Int, t), "mod", (b: Int, _))     => (a % b, t)
             case ((a: Long, t), "+", (b: Long, _))     => (a + b, t)
             case ((a: Long, t), "-", (b: Long, _))     => (a - b, t)
             case ((a: Long, t), "*", (b: Long, _))     => (a * b, t)
             case ((a: Long, t), "/", (b: Long, _))     => (a / b, t)
-            case ((a: Long, t), "%", (b: Long, _))     => (a % b, t)
+            case ((a: Long, t), "mod", (b: Long, _))   => (a % b, t)
             case ((a: Double, t), "+", (b: Double, _)) => (a + b, t)
             case ((a: Double, t), "-", (b: Double, _)) => (a - b, t)
             case ((a: Double, t), "*", (b: Double, _)) => (a * b, t)
@@ -150,10 +150,12 @@ object CodeGenerator {
           case TypePatternAST(tpos, VariablePatternAST(pos, name), typename) => name -> typeFromString(typename)
           case p: PatternAST                                                 => problem(p.pos, s"pattern type not implemented yet: $p")
         }: _*)
+      var expval: String = "undef"
 
       def operation(s: String) = {
         indent(s"%${valueCounter.next} = $s")
-        valueCounter.current
+        expval = valueCounter.toString
+        expval
       }
 
       def labelName = s"l${blockCounter.next}"
@@ -181,12 +183,12 @@ object CodeGenerator {
         val (rt, ol, or) =
           (tl, tr) match {
             case _ if tl == tr                             => (tl, l, r)
-            case (DoubleType, LongType)                    => (DoubleType, l, operation(s"sitofp i64 %$r to double"))
-            case (LongType, DoubleType)                    => (DoubleType, operation(s"sitofp i64 %$l to double"), r)
-            case (LongType, IntType)                       => (LongType, l, operation(s"sext i32 %$r to i64"))
-            case (IntType, LongType)                       => (LongType, operation(s"sext i32 %$l to i64"), r)
-            case (DoubleType, IntType)                     => (DoubleType, l, operation(s"sitofp i32 %$r to double"))
-            case (IntType, DoubleType)                     => (DoubleType, operation(s"sitofp i32 %$l to double"), r)
+            case (DoubleType, LongType)                    => (DoubleType, l, operation(s"sitofp i64 $r to double"))
+            case (LongType, DoubleType)                    => (DoubleType, operation(s"sitofp i64 $l to double"), r)
+            case (LongType, IntType)                       => (LongType, l, operation(s"sext i32 $r to i64"))
+            case (IntType, LongType)                       => (LongType, operation(s"sext i32 $l to i64"), r)
+            case (DoubleType, IntType)                     => (DoubleType, l, operation(s"sitofp i32 $r to double"))
+            case (IntType, DoubleType)                     => (DoubleType, operation(s"sitofp i32 $l to double"), r)
             case (IntType, CharType) | (CharType, IntType) => (IntType, l, r)
           }
 
@@ -216,11 +218,11 @@ object CodeGenerator {
             case (_: FloatType, ">=")    => "fcmp uge"
           }
 
-        operation(s"$inst $rt %$ol, %$or")
+        operation(s"$inst $rt $ol, $or")
         rt
       }
 
-      def compileExpression(rvalue: Boolean, expr: ExpressionAST): (Int, Type) = {
+      def compileExpression(rvalue: Boolean, expr: ExpressionAST): (String, Type) = {
         val typ =
           expr match {
             case ConditionalExpressionAST(cond, els) =>
@@ -228,7 +230,7 @@ object CodeGenerator {
 
               @tailrec
               def gencond(cs: Seq[(Position, ExpressionAST, ExpressionAST)],
-                          truelist: List[(String, (Int, Type))]): (List[(String, (Int, Type))], String) = {
+                          truelist: List[(String, (String, Type))]): (List[(String, (String, Type))], String) = {
                 val (pos, condexpr, trueexpr) = cs.head
 
                 val truelabel  = labelName
@@ -241,7 +243,7 @@ object CodeGenerator {
                 if (condtype != BoolType)
                   problem(pos, s"expected expression of type Bool, found ${condtype.name}")
 
-                indent(s"br i1 %$condvalue, label %$truelabel, label %$falselabel")
+                indent(s"br i1 $condvalue, label %$truelabel, label %$falselabel")
                 line(s"$truelabel:")
 
                 val trueval = compileExpression(rvalue, trueexpr)
@@ -265,14 +267,14 @@ object CodeGenerator {
               indent(s"br label %$donelabel")
               line(s"$donelabel:")
               operation(
-                s"phi $falsetyp ${truelist map { case (truelabel, (trueval, _)) => s"[ %$trueval, %$truelabel ]" } mkString ", "}, [ %$falseval, %$falselabel ]")
+                s"phi $falsetyp ${truelist map { case (truelabel, (trueval, _)) => s"[ $trueval, %$truelabel ]" } mkString ", "}, [ $falseval, %$falselabel ]")
               falsetyp // todo: get type correctly by looking all types
             case WhileExpressionAST(lab, cond, body, els) =>
               val begin  = label
               val end    = labelName
               val inside = labelName
 
-              indent(s"br i1 %${compileExpression(true, cond)._1}, label %$inside, label %$end")
+              indent(s"br i1 ${compileExpression(true, cond)._1}, label %$inside, label %$end")
               line(s"$inside:")
               body foreach (compileExpression(true, _))
               indent(s"br label $begin")
@@ -281,7 +283,7 @@ object CodeGenerator {
             case UnaryExpressionAST("-", pos, expr) =>
               val (operand, typ) = compileExpression(true, expr)
 
-              operation(s"sub $typ 0, %$operand")
+              operation(s"sub $typ 0, $operand")
               typ
             case BinaryExpressionAST(lpos, left, op, rpos, right) =>
               compileBinaryExpression(lpos, left, op, rpos, right)
@@ -291,26 +293,27 @@ object CodeGenerator {
             case LiteralExpressionAST(v: Any) =>
               val (value, typ) = literal(v)
 
-              indent(s"store $typ $value, $typ* %${operation(s"alloca $typ")}")
-              operation(s"load $typ, $typ* %${valueCounter.current}")
+              indent(s"store $typ $value, $typ* ${operation(s"alloca $typ")}")
+              operation(s"load $typ, $typ* $valueCounter")
               typ
             case VariableExpressionAST(pos, name) =>
               globalDefs get name match {
                 case Some(VarDef(typ, _)) =>
-                  indent(s"store $typ @$name, $typ* %${operation(s"alloca $typ")}")
-                  operation(s"load $typ, $typ* %${valueCounter.current}")
+                  if (rvalue)
+                    operation(s"load $typ, $typ* @$name")
+                  else
+                    expval = s"@$name"
+
                   typ
-                case Some(FunctionDef(func @ FunctionType(ret, parms, arb))) =>
-                  indent(s"store $ret (${parms mkString ","})* @$name, $ret (${parms mkString ","})** %${operation(
-                    s"alloca $ret (${parms mkString ","})*, align 8")}, align 8")
-                  operation(
-                    s"load $ret (${parms mkString ","})*, $ret (${parms mkString ","})** %${valueCounter.current}, align 8")
-                  FunctionType(IntType, List(IntType, IntType))
+                case Some(FunctionDef(typ)) =>
+                  indent(s"store $typ* @$name, $typ** ${operation(s"alloca $typ*, align 8")}, align 8")
+                  operation(s"load $typ*, $typ** $valueCounter, align 8")
+                  typ
                 case None =>
                   parmMap get name match {
                     case Some(typ) =>
                       indent(s"store $typ %$name, $typ* %${operation(s"alloca $typ")}")
-                      operation(s"load $typ, $typ* %${valueCounter.current}")
+                      operation(s"load $typ, $typ* $valueCounter")
                       typ
                     case None =>
                       problem(pos, s"unknown identifier: $name")
@@ -320,16 +323,16 @@ object CodeGenerator {
               val (a, at) = compileExpression(true, arg)
 
               indent(
-                s"store i32 (i8*, ...)* @printf, i32 (i8*, ...)** %${operation("alloca i32 (i8*, ...)*, align 8")}, align 8")
-              operation(s"load i32 (i8*, ...)*, i32 (i8*, ...)** %${valueCounter.current}, align 8")
+                s"store i32 (i8*, ...)* @printf, i32 (i8*, ...)** ${operation("alloca i32 (i8*, ...)*, align 8")}, align 8")
+              operation(s"load i32 (i8*, ...)*, i32 (i8*, ...)** $valueCounter, align 8")
 
               at match {
                 case IntType =>
                   operation(
-                    s"call i32 (i8*, ...) %${valueCounter.current} (i8* getelementptr inbounds ([4 x i8], [4 x i8]* @.int.format, i64 0, i64 0), i32 %$a)")
+                    s"call i32 (i8*, ...) $valueCounter (i8* getelementptr inbounds ([4 x i8], [4 x i8]* @.int.format, i64 0, i64 0), i32 $a)")
                 case DoubleType =>
                   operation(
-                    s"call i32 (i8*, ...) %${valueCounter.current} (i8* getelementptr inbounds ([4 x i8], [4 x i8]* @.double.format, i64 0, i64 0), double %$a)")
+                    s"call i32 (i8*, ...) $valueCounter (i8* getelementptr inbounds ([4 x i8], [4 x i8]* @.double.format, i64 0, i64 0), double $a)")
               }
 
               VoidType
@@ -345,18 +348,18 @@ object CodeGenerator {
                   yield {
                     val (e, t) = compileExpression(true, a)
 
-                    s"$t %$e"
+                    s"$t $e"
                   }
 
               operation(
-                s"call $rtyp (${Iterator.fill(args.length)("i32") mkString ", "}) %$func (${argvals mkString ", "})")
+                s"call $rtyp (${Iterator.fill(args.length)("i32") mkString ", "}) $func (${argvals mkString ", "})")
               rtyp
             case ComparisonExpressionAST(lpos, left, List((comp, rpos, right))) =>
               compileBinaryExpression(lpos, left, comp, rpos, right)
               BoolType
           }
 
-        (valueCounter.current, typ)
+        (expval, typ)
       }
 
       line(
@@ -365,7 +368,7 @@ object CodeGenerator {
 
       val (v, t) = compileExpression(true, parts.head.body)
 
-      indent(if (t == VoidType) "ret void" else s"ret $t %$v") // todo: convert 't' (expression type) to 'ret' (function's declared type)
+      indent(if (t == VoidType) "ret void" else s"ret $t $v") // todo: convert 't' (expression type) to 'ret' (function's declared type)
       line("}")
     }
 
@@ -386,11 +389,11 @@ object CodeGenerator {
       count - 1
     }
 
-    def current: Int =
+    override def toString =
       if (count == 0)
         sys.error("no last count")
       else
-        count - 1
+        s"%${count - 1}"
 
   }
 
