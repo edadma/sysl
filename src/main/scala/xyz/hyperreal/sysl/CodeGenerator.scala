@@ -171,6 +171,55 @@ object CodeGenerator {
           case t: ExpressionAST           => compileExpression(t)._2
         }
 
+      def compileBinaryExpression(lpos: Position,
+                                  left: ExpressionAST,
+                                  op: String,
+                                  rpos: Position,
+                                  right: ExpressionAST) = {
+        val (l, tl) = compileExpression(left)
+        val (r, tr) = compileExpression(right)
+        val (rt, ol, or) =
+          (tl, tr) match {
+            case _ if tl == tr                             => (tl, l, r)
+            case (DoubleType, LongType)                    => (DoubleType, l, operation(s"sitofp i64 %$r to double"))
+            case (LongType, DoubleType)                    => (DoubleType, operation(s"sitofp i64 %$l to double"), r)
+            case (LongType, IntType)                       => (LongType, l, operation(s"sext i32 %$r to i64"))
+            case (IntType, LongType)                       => (LongType, operation(s"sext i32 %$l to i64"), r)
+            case (DoubleType, IntType)                     => (DoubleType, l, operation(s"sitofp i32 %$r to double"))
+            case (IntType, DoubleType)                     => (DoubleType, operation(s"sitofp i32 %$l to double"), r)
+            case (IntType, CharType) | (CharType, IntType) => (IntType, l, r)
+          }
+
+        val inst =
+          (rt, op) match {
+            case (_: IntegerType, "+")   => "add"
+            case (_: FloatType, "+")     => "fadd"
+            case (_: IntegerType, "-")   => "sub"
+            case (_: FloatType, "-")     => "fsub"
+            case (_: IntegerType, "*")   => "mul"
+            case (_: FloatType, "*")     => "fmul"
+            case (_: IntegerType, "/")   => "sdiv"
+            case (_: FloatType, "/")     => "fdiv"
+            case (_: IntegerType, "mod") => "srem"
+            case (_: FloatType, "mod")   => "frem"
+            case (_: IntegerType, "==")  => "icmp eq" // todo: unsigned comparisons?
+            case (_: FloatType, "==")    => "fcmp ueq"
+            case (_: IntegerType, "!=")  => "icmp ne"
+            case (_: FloatType, "!=")    => "fcmp une"
+            case (_: IntegerType, "<")   => "icmp slt"
+            case (_: FloatType, "<")     => "fcmp ult"
+            case (_: IntegerType, "<=")  => "icmp sle"
+            case (_: FloatType, "<=")    => "fcmp ule"
+            case (_: IntegerType, ">")   => "icmp sgt"
+            case (_: FloatType, ">")     => "fcmp ugt"
+            case (_: IntegerType, ">=")  => "icmp sge"
+            case (_: FloatType, ">=")    => "fcmp uge"
+          }
+
+        operation(s"$inst $rt %$ol, %$or")
+        rt
+      }
+
       def compileExpression(expr: ExpressionAST): (Int, Type) = {
         val typ =
           expr match {
@@ -202,10 +251,16 @@ object CodeGenerator {
               }
 
               gencond(cond)
-              els foreach compileExpression
+
+              val t =
+                els match {
+                  case None    => VoidType
+                  case Some(e) => compileExpression(e)._2
+                }
+
               indent(s"br label %$donelabel")
               line(s"$donelabel:")
-              VoidType // todo: get type correctly by looking all posibilities
+              t // todo: get type correctly by looking all posibilities
             case WhileExpressionAST(lab, cond, body, els) =>
               val begin  = label
               val end    = labelName
@@ -223,48 +278,7 @@ object CodeGenerator {
               operation(s"sub $typ 0, %$operand")
               typ
             case BinaryExpressionAST(lpos, left, op, rpos, right) =>
-              val (l, tl) = compileExpression(left)
-              val (r, tr) = compileExpression(right)
-              val (rt, ol, or) =
-                (tl, tr) match {
-                  case _ if tl == tr                             => (tl, l, r)
-                  case (DoubleType, LongType)                    => (DoubleType, l, operation(s"sitofp i64 %$r to double"))
-                  case (LongType, DoubleType)                    => (DoubleType, operation(s"sitofp i64 %$l to double"), r)
-                  case (LongType, IntType)                       => (LongType, l, operation(s"sext i32 %$r to i64"))
-                  case (IntType, LongType)                       => (LongType, operation(s"sext i32 %$l to i64"), r)
-                  case (DoubleType, IntType)                     => (DoubleType, l, operation(s"sitofp i32 %$r to double"))
-                  case (IntType, DoubleType)                     => (DoubleType, operation(s"sitofp i32 %$l to double"), r)
-                  case (IntType, CharType) | (CharType, IntType) => (IntType, l, r)
-                }
-
-              val inst =
-                (rt, op) match {
-                  case (_: IntegerType, "+")   => "add"
-                  case (_: FloatType, "+")     => "fadd"
-                  case (_: IntegerType, "-")   => "sub"
-                  case (_: FloatType, "-")     => "fsub"
-                  case (_: IntegerType, "*")   => "mul"
-                  case (_: FloatType, "*")     => "fmul"
-                  case (_: IntegerType, "/")   => "sdiv"
-                  case (_: FloatType, "/")     => "fdiv"
-                  case (_: IntegerType, "mod") => "srem"
-                  case (_: FloatType, "mod")   => "frem"
-                  case (_: IntegerType, "==")  => "icmp eq" // todo: unsigned comparisons?
-                  case (_: FloatType, "==")    => "fcmp ueq"
-                  case (_: IntegerType, "!=")  => "icmp ne"
-                  case (_: FloatType, "!=")    => "fcmp une"
-                  case (_: IntegerType, "<")   => "icmp slt"
-                  case (_: FloatType, "<")     => "fcmp ult"
-                  case (_: IntegerType, "<=")  => "icmp sle"
-                  case (_: FloatType, "<=")    => "fcmp ule"
-                  case (_: IntegerType, ">")   => "icmp sgt"
-                  case (_: FloatType, ">")     => "fcmp ugt"
-                  case (_: IntegerType, ">=")  => "icmp sge"
-                  case (_: FloatType, ">=")    => "fcmp uge"
-                }
-
-              operation(s"$inst $rt %$ol, %$or")
-              rt
+              compileBinaryExpression(lpos, left, op, rpos, right)
             case BlockExpressionAST(stmts) =>
               stmts.init foreach compileStatement
               compileStatement(stmts.last)
@@ -330,6 +344,9 @@ object CodeGenerator {
               operation(
                 s"call $rtyp (${Iterator.fill(args.length)("i32") mkString ", "}) %$func(${argvals mkString ", "})")
               rtyp
+            case ComparisonExpressionAST(lpos, left, List((comp, rpos, right))) =>
+              compileBinaryExpression(lpos, left, comp, rpos, right)
+              BoolType
           }
 
         (valueCounter.current, typ)
