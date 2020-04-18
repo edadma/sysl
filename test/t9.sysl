@@ -1,5 +1,5 @@
 var v: Double = 5.2
 
 def main: Int
-    print( v, ++v, v )
+    print( v, v++, v )
     0

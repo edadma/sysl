@@ -222,8 +222,12 @@ object CodeGenerator {
                                   op: String,
                                   rpos: Position,
                                   right: ExpressionAST) = {
-        val (l, tl) = compileExpression(true, left)
-        val (r, tr) = compileExpression(true, right)
+        binaryExpression(lpos, compileExpression(true, left), op, rpos, compileExpression(true, right))
+      }
+
+      def binaryExpression(lpos: Position, left: (String, Type), op: String, rpos: Position, right: (String, Type)) = {
+        val (l, tl) = left
+        val (r, tr) = right
         val (rt, ol, or) =
           (tl, tr) match {
             case _ if tl == tr                             => (tl, l, r)
@@ -360,7 +364,13 @@ object CodeGenerator {
               indent(s"store $typ $valueCounter, $ltyp $lvalue")
               typ
             case PostExpressionAST(op, pos, expr) =>
-              UnitType
+              val (lvalue, ltyp) = compileExpression(false, expr)
+              val (rvalue, rtyp) = compileExpression(true, expr)
+              val typ            = binaryExpression(pos, (rvalue, rtyp), op.head.toString, null, ("1", IntType))
+
+              indent(s"store $typ $valueCounter, $ltyp $lvalue")
+              expval = rvalue
+              rtyp
             case VariableExpressionAST(pos, name) =>
               globalDefs get name match {
                 case Some(VarDef(typ, _)) =>
