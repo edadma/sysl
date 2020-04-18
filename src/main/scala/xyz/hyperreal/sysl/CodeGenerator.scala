@@ -294,6 +294,12 @@ object CodeGenerator {
               indent(s"store $typ $value, $typ* %${operation(s"alloca $typ")}")
               operation(s"load $typ, $typ* %${valueCounter.current}")
               typ
+            case PreExpressionAST(op, pos, expr) =>
+              val (lvalue, ltyp) = compileExpression(true, expr)
+              val (rvalue, rtyp) = compileExpression(false, expr)
+              val res            = compileBinaryExpression(null, rvalue, op)
+              UnitType
+            case PostExpressionAST(op, pos, expr) =>
             case VariableExpressionAST(pos, name) =>
               globalDefs get name match {
                 case Some(VarDef(typ, _)) =>
