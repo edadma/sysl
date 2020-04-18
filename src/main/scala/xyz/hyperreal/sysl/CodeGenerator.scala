@@ -9,6 +9,7 @@ object CodeGenerator {
   def apply(as: List[SourceAST]): String = {
     val globalDefs = new mutable.HashMap[String, Def]
     val out        = new StringBuilder
+    val stringMap  = new mutable.HashMap[String, Int]
 
     def line(s: String): Unit = {
       out ++= s
@@ -28,6 +29,7 @@ object CodeGenerator {
     def compileSource(src: SourceAST): Unit = {
       line("""@.int.format = private unnamed_addr constant [3 x i8] c"%d\00", align 1""")
       line("""@.double.format = private unnamed_addr constant [3 x i8] c"%f\00", align 1""")
+      line("""@.str.format = private unnamed_addr constant [3 x i8] c"%s\00", align 1""")
       line("""@.nl.format = private unnamed_addr constant [2 x i8] c"\0A\00", align 1""")
       line("""@.comma.format = private unnamed_addr constant [3 x i8] c", \00", align 1""")
       line("declare i32 @printf(i8*, ...)")
@@ -43,6 +45,37 @@ object CodeGenerator {
         case "Char"   => CharType
       }
 
+    def strings(ast: AST): Unit =
+      ast match {
+        case LiteralExpressionAST(s: String) =>
+          line(s"""@.str.${stringMap.size} = private unnamed_addr constant [${s.length + 1} x i8] c"$s\00", align 1""")
+          stringMap(s) = stringMap.size
+        case LiteralExpressionAST(_) =>
+        case FunctionPart(guard, body) =>
+          guard foreach strings
+          strings(body)
+        case BlockExpressionAST(stmts)                              => stmts foreach strings
+        case UnaryExpressionAST(op, pos, expr)                      => strings(expr)
+        case ApplyExpressionAST(fpos, f, apos, args, tailrecursive) => args foreach { case (_, e) => strings(e) }
+        case BinaryExpressionAST(lpos, left, op, rpos, right) =>
+          strings(left)
+          strings(right)
+        case ComparisonExpressionAST(pos, expr, comparisons) =>
+          strings(expr)
+          comparisons foreach { case (_, _, e) => strings(e) }
+        case WhileExpressionAST(label, cond, body, els) =>
+          strings(cond)
+          body foreach strings
+          els foreach strings
+        case ConditionalExpressionAST(cond, els) =>
+          cond foreach {
+            case (_, c, t) =>
+              strings(c)
+              strings(t)
+          }
+          els foreach strings
+      }
+
     def compileTopLevelStatementPass1(stmt: StatementAST): Unit =
       stmt match {
         case DeclarationBlockAST(decls) => decls foreach compileTopLevelStatementPass1
@@ -50,6 +83,7 @@ object CodeGenerator {
           globalDefs(name) = FunctionDef(FunctionType(typeFromString(ret.get._2), parms map {
             case TypePatternAST(_, _, typename) => typeFromString(typename)
           }, arb))
+          parts foreach strings
         case VarAST(pos, name, Some(dtyp), init) => // todo: variable type
           globalDefs get name match {
             case Some(_) => problem(pos, s"duplicate definition for '$name''")
@@ -61,6 +95,7 @@ object CodeGenerator {
                 }
               globalDefs(name) = VarDef(typ, const) // todo: actual type should be declared, with possible conversion
           }
+          init map (_._2) foreach strings
       }
 
     def compileTopLevelStatementPass2(stmt: StatementAST): Unit =
@@ -287,11 +322,16 @@ object CodeGenerator {
 
               operation(s"sub $typ 0, $operand")
               typ
+//            case UnaryExpressionAST("*", pos, expr) =>
             case BinaryExpressionAST(lpos, left, op, rpos, right) =>
               compileBinaryExpression(lpos, left, op, rpos, right)
             case BlockExpressionAST(stmts) =>
               stmts.init foreach compileStatement
               compileStatement(stmts.last)
+            case LiteralExpressionAST(s: String) =>
+              operation(
+                s"getelementptr inbounds [${s.length + 1} x i8], [${s.length + 1} x i8]* @.str.${stringMap(s)}, i64 0, i64 0")
+              PointerType(ByteType)
             case LiteralExpressionAST(v: Any) =>
               val (value, typ) = literal(v)
 
@@ -340,6 +380,11 @@ object CodeGenerator {
                       case DoubleType =>
                         operation(
                           s"call i32 (i8*, ...) $printf (i8* getelementptr inbounds ([3 x i8], [3 x i8]* @.double.format, i64 0, i64 0), double $a)")
+                      case PointerType(ByteType) =>
+                        val LiteralExpressionAST(s: String) = arg
+
+                        operation(
+                          s"call i32 (i8*, ...) $printf (i8* getelementptr inbounds ([3 x i8], [3 x i8]* @.str.format, i64 0, i64 0), i8* $a)")
                       case _ => problem(pos, "don't know how to print that (yet)")
                     }
 
