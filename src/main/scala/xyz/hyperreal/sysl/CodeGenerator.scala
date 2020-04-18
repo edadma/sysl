@@ -310,14 +310,19 @@ object CodeGenerator {
                 s"phi $falsetyp ${truelist map { case (truelabel, (trueval, _)) => s"[ $trueval, %$truelabel ]" } mkString ", "}, [ $falseval, %$falselabel ]")
               falsetyp // todo: get type correctly by looking all types
             case WhileExpressionAST(lab, cond, body, els) =>
-              val begin  = label
-              val end    = labelName
-              val inside = labelName
+              val begin = labelName
 
-              indent(s"br i1 ${compileExpression(true, cond)._1}, label %$inside, label %$end")
-              line(s"$inside:")
+              indent(s"br label %$begin")
+              line(s"$begin:")
+
+              val end      = labelName
+              val loopbody = labelName
+
+              indent(s"br i1 ${compileExpression(true, cond)._1}, label %$loopbody, label %$end")
+              line(s"$loopbody:")
               body foreach (compileExpression(true, _))
-              indent(s"br label $begin")
+              indent(s"br label %$begin")
+              line(s"$end:")
               UnitType // todo: get type correctly by looking all while body
             case UnaryExpressionAST("+", pos, expr) => compileExpression(true, expr)._2
             case UnaryExpressionAST("-", pos, expr) =>
