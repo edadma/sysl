@@ -47,6 +47,8 @@ object CodeGenerator {
 
     def strings(ast: AST): Unit =
       ast match {
+        case PreExpressionAST(op, pos, expr)  => strings(expr)
+        case PostExpressionAST(op, pos, expr) => strings(expr)
         case LiteralExpressionAST(s: String) =>
           line(s"""@.str.${stringMap.size} = private unnamed_addr constant [${s.length + 1} x i8] c"$s\00", align 1""")
           stringMap(s) = stringMap.size
@@ -323,6 +325,10 @@ object CodeGenerator {
               body foreach (compileExpression(true, _))
               indent(s"br label %$begin")
               line(s"$end:")
+
+              if (!rvalue) // todo: flip the variable to lvalue
+                expval = null
+
               UnitType // todo: get type correctly by looking all while body
             case UnaryExpressionAST("+", pos, expr) => compileExpression(true, expr)._2
             case UnaryExpressionAST("-", pos, expr) =>
@@ -345,12 +351,14 @@ object CodeGenerator {
 
               expval = value.toString
               typ
-            case PreExpressionAST(op, pos, expr) =>
-              val (lvalue, ltyp) = compileExpression(true, expr)
-              val (rvalue, rtyp) = compileExpression(false, expr)
-              val res            = compileBinaryExpression(null, rvalue, op)
-              UnitType
+            case PreExpressionAST(op @ ("++" | "--"), pos, expr) =>
+              val (lvalue, ltyp) = compileExpression(false, expr)
+              val typ            = compileBinaryExpression(pos, expr, op.head.toString, null, LiteralExpressionAST(1))
+
+              indent(s"store $typ $valueCounter, $ltyp $lvalue")
+              typ
             case PostExpressionAST(op, pos, expr) =>
+              UnitType
             case VariableExpressionAST(pos, name) =>
               globalDefs get name match {
                 case Some(VarDef(typ, _)) =>
