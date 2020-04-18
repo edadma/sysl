@@ -50,7 +50,10 @@ object CodeGenerator {
         case LiteralExpressionAST(s: String) =>
           line(s"""@.str.${stringMap.size} = private unnamed_addr constant [${s.length + 1} x i8] c"$s\00", align 1""")
           stringMap(s) = stringMap.size
-        case LiteralExpressionAST(_) =>
+        case LiteralExpressionAST(_) | VariableExpressionAST(_, _) =>
+        case AssignmentExpressionAST(lhs, _, rhs) =>
+          lhs foreach { case (_, e) => strings(e) }
+          rhs foreach { case (_, e) => strings(e) }
         case FunctionPart(guard, body) =>
           guard foreach strings
           strings(body)
@@ -341,12 +344,13 @@ object CodeGenerator {
             case VariableExpressionAST(pos, name) =>
               globalDefs get name match {
                 case Some(VarDef(typ, _)) =>
-                  if (rvalue)
+                  if (rvalue) {
                     operation(s"load $typ, $typ* @$name")
-                  else
+                    typ
+                  } else {
                     expval = s"@$name"
-
-                  typ
+                    PointerType(typ)
+                  }
                 case Some(FunctionDef(typ)) =>
                   indent(s"store $typ* @$name, $typ** ${operation(s"alloca $typ*, align 8")}, align 8")
                   operation(s"load $typ*, $typ** $valueCounter, align 8")
@@ -420,6 +424,22 @@ object CodeGenerator {
             case ComparisonExpressionAST(lpos, left, List((comp, rpos, right))) =>
               compileBinaryExpression(lpos, left, comp, rpos, right)
               BoolType
+            case AssignmentExpressionAST(lhs, op, rhs) =>
+              val (lpos, l) = lhs.head
+              val (rpos, r) = rhs.head
+
+              val (lvalue, ltyp) = compileExpression(false, l)
+              val (rvalue, rtyp) = compileExpression(true, r)
+
+              ltyp match {
+                case PointerType(typ) =>
+                  if (typ != rtyp)
+                    problem(rpos, s"incompatible types")
+                case _ => problem(lpos, "not an l-value")
+              }
+
+              indent(s"store $rtyp $rvalue, $ltyp $lvalue")
+              UnitType // should be the resulting value
           }
 
         (if (typ == UnitType) UnitType.void else expval, typ)
