@@ -132,7 +132,9 @@ object CodeGenerator {
         }
 
       expr match {
+        case LiteralExpressionAST(v: Char)    => literal(v)
         case LiteralExpressionAST(v: Int)     => literal(v)
+        case LiteralExpressionAST(v: Double)  => literal(v)
         case UnaryExpressionAST("+", _, expr) => numeric(expr)
         case UnaryExpressionAST("-", _, expr) =>
           numeric(expr) match {
@@ -373,6 +375,7 @@ object CodeGenerator {
                   indent(s"store $typ* @$name, $typ** ${operation(s"alloca $typ*, align 8")}, align 8")
                   operation(s"load $typ*, $typ** $valueCounter, align 8")
                   typ
+                case Some(_) => problem(pos, "unimplemented")
                 case None =>
                   parmMap get name match {
                     case Some(typ) =>

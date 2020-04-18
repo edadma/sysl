@@ -1,4 +1,4 @@
-var v: Int = 5
+var v: Double = 5.2
 
 def main: Int
     print( v, ++v, v )
