@@ -2,6 +2,6 @@ var v: Int = 123
 
 def main: Int
     print(v)
-    v = 5
+    v = v + 1
     print(v)
     0

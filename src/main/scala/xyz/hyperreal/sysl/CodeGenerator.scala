@@ -114,7 +114,7 @@ object CodeGenerator {
 
     def literal(v: Any): (Any, Type) =
       v match {
-        case null       => (0, PointerType(UnitType))
+        case null       => (null, PointerType(UnitType))
         case a: Int     => (a, IntType)
         case a: Long    => (a, LongType)
         case a: Char    => (a, CharType)
@@ -338,8 +338,7 @@ object CodeGenerator {
             case LiteralExpressionAST(v: Any) =>
               val (value, typ) = literal(v)
 
-              indent(s"store $typ $value, $typ* ${operation(s"alloca $typ")}")
-              operation(s"load $typ, $typ* $valueCounter")
+              expval = value.toString
               typ
             case VariableExpressionAST(pos, name) =>
               globalDefs get name match {
