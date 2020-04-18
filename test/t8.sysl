@@ -1,0 +1,8 @@
+var v: Int = 1
+
+def main: Int
+    while v <= 5
+        print(v)
+        v = v + 1
+
+    0

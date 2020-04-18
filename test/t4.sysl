@@ -1,5 +1,5 @@
-var a = 123
+var a: Int = 123
 
-def main
-    print(a)
+def main: Int
+    print(a + 2)
     0

@@ -1,9 +1,10 @@
-def main
-    if 2 < 1
+def main: Int
+    if true
         print( 123 )
-    elif 2 < 1
+    elif false
         print( 2 )
     else
         print( 456 )
 
     print( 789 )
+    0

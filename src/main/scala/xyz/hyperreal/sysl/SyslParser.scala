@@ -708,9 +708,15 @@ class SyslParser extends StandardTokenParsers with PackratParsers {
 
   lazy val unaryExpression: PackratParser[ExpressionAST] =
     "-" ~> pos ~ incrementExpression ^^ {
-      case _ ~ LiteralExpressionAST(n: BigDecimal) => LiteralExpressionAST(-n)
-      case p ~ v                                   => UnaryExpressionAST("-", p, v)
+      case _ ~ LiteralExpressionAST(n: Int)    => LiteralExpressionAST(-n)
+      case _ ~ LiteralExpressionAST(n: Double) => LiteralExpressionAST(-n)
+      case p ~ v                               => UnaryExpressionAST("-", p, v)
     } |
+      "*" ~> pos ~ incrementExpression ^^ {
+        case _ ~ LiteralExpressionAST(n: Int)    => LiteralExpressionAST(-n)
+        case _ ~ LiteralExpressionAST(n: Double) => LiteralExpressionAST(-n)
+        case p ~ v                               => UnaryExpressionAST("*", p, v)
+      } |
 //      "." ~> incrementExpression ^^ DereferenceExpressionAST |
       incrementExpression
 
