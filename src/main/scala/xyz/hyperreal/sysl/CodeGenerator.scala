@@ -51,7 +51,7 @@ object CodeGenerator {
 //        case "unit"   => UnitType
 //      }
 
-    def datatype(pos: Position, datatypeAST: DatatypeAST): Type =
+    def datatype(pos: Position, datatypeAST: DatatypeAST): Type = {
       datatypeAST match {
         case IntTypeAST          => IntType
         case BCharTypeAST        => BCharType
@@ -62,6 +62,7 @@ object CodeGenerator {
         case IdentTypeAST(name)  => problem(pos, s"unknown type '$name'")
         case PointerTypeAST(typ) => PointerType(datatype(pos, typ))
       }
+    }
 
     def strings(ast: AST): Unit =
       ast match {
@@ -116,8 +117,12 @@ object CodeGenerator {
 
               val (const, typ) =
                 init match {
-                  case None if dtyp isDefined => ("0", datatype(dtyp.get._1, dtyp.get._2))
-                  case None                   => problem(pos, "missing type")
+                  case None if dtyp isDefined =>
+                    datatype(dtyp.get._1, dtyp.get._2) match {
+                      case t: PointerType => ("null", t)
+                      case t              => ("0", t)
+                    }
+                  case None => problem(pos, "need type or initializer (or both)")
                   case Some((pos, AddressExpressionAST(apos, name))) =>
                     globalDefs get name match {
                       case Some(d: Def) => (s"@$name", d.typ)
@@ -138,6 +143,7 @@ object CodeGenerator {
                           dt
                         else
                           problem(dtyp.get._1, "type parameters are not the same type")
+                      case (a, b) if a == b => a
                     }
                 }
 

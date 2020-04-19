@@ -1,14 +1,14 @@
 var p: bchar*
 
 def main: int
-    p =  = "asdf"
+  p = "asdf"
 
-    while *p != 0
-        print( *p++ )
+  while *p != 0
+    print( *p++ )
 
-    p = "zxcv"
+  p = "zxcv"
 
-    while *p != 0
-        print( *p++ )
+  while *p != 0
+    print( *p++ )
 
-    0
+  0
