@@ -138,6 +138,7 @@ abstract class DatatypeAST                  extends AST
 case object IntTypeAST                      extends DatatypeAST
 case object LongTypeAST                     extends DatatypeAST
 case object DoubleTypeAST                   extends DatatypeAST
+case object BCharTypeAST                    extends DatatypeAST
 case object CharTypeAST                     extends DatatypeAST
 case object UnitTypeAST                     extends DatatypeAST
 case class IdentTypeAST(name: String)       extends DatatypeAST

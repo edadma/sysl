@@ -1,0 +1,5 @@
+var p: bchar* = "asdf"
+
+def main: int
+    print( *p )
+    0

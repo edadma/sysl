@@ -177,6 +177,7 @@ class SyslLexical
 
   reserved ++= List(
     "and",
+    "bchar",
     "break",
     "by",
     "char",
@@ -830,6 +831,7 @@ class SyslParser extends StandardTokenParsers with PackratParsers {
     "int" ^^^ IntTypeAST |
       "long" ^^^ LongTypeAST |
       "double" ^^^ DoubleTypeAST |
+      "bchar" ^^^ BCharTypeAST |
       "char" ^^^ CharTypeAST |
       "unit" ^^^ UnitTypeAST
 }

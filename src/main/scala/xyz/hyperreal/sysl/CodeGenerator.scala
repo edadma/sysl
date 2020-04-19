@@ -28,6 +28,7 @@ object CodeGenerator {
 
     def compileSource(src: SourceAST): Unit = {
       line("""@.int.format = private unnamed_addr constant [3 x i8] c"%d\00", align 1""")
+      line("""@.char.format = private unnamed_addr constant [3 x i8] c"%c\00", align 1""")
       line("""@.double.format = private unnamed_addr constant [3 x i8] c"%f\00", align 1""")
       line("""@.str.format = private unnamed_addr constant [3 x i8] c"%s\00", align 1""")
       line("""@.nl.format = private unnamed_addr constant [2 x i8] c"\0A\00", align 1""")
@@ -49,6 +50,7 @@ object CodeGenerator {
     def datatype(pos: Position, datatypeAST: DatatypeAST): Type =
       datatypeAST match {
         case IntTypeAST          => IntType
+        case BCharTypeAST        => BCharType
         case CharTypeAST         => CharType
         case LongTypeAST         => LongType
         case UnitTypeAST         => UnitType
@@ -62,7 +64,7 @@ object CodeGenerator {
         case DerefExpressionAST(_, _, expr)   => strings(expr)
         case PreExpressionAST(op, pos, expr)  => strings(expr)
         case PostExpressionAST(op, pos, expr) => strings(expr)
-        case LiteralExpressionAST(s: String) =>
+        case LiteralExpressionAST(s: String) if !stringMap.contains(s) =>
           line(s"""@.str.${stringMap.size} = private unnamed_addr constant [${s.length + 1} x i8] c"$s\00", align 1""")
           stringMap(s) = stringMap.size
         case _: LiteralExpressionAST | _: VariableExpressionAST | _: AddressExpressionAST =>
@@ -102,22 +104,42 @@ object CodeGenerator {
             case TypePatternAST(_, pos, typename) => datatype(pos, typename)
           }, arb))
           parts foreach strings
-        case VarAST(pos, name, Some(dtyp), init) => // todo: variable type
+        case VarAST(pos, name, dtyp, init) => // todo: variable type
           globalDefs get name match {
-            case Some(_) => problem(pos, s"duplicate definition for '$name''")
+            case Some(_) => problem(pos, s"duplicate definition for '$name'")
             case None =>
+              init map (_._2) foreach strings
+
               val (const, typ) =
                 init match {
-                  case None => (0, datatype(pos, dtyp._2))
+                  case None if dtyp isDefined => ("0", datatype(dtyp.get._1, dtyp.get._2))
+                  case None                   => problem(pos, "missing type")
                   case Some((pos, AddressExpressionAST(apos, name))) =>
                     globalDefs get name match {
-                      case Some(d: Def) => (s"@$name", datatype(pos, dtyp._2))
+                      case Some(d: Def) => (s"@$name", d.typ)
                       case None         => problem(pos, s"unknown variable: $name")
                     }
+                  case Some((pos, LiteralExpressionAST(s: String))) =>
+                    (s"@.str.${stringMap(s)}", PointerType(ArrayType(s.length + 1, BCharType)))
                   case Some((pos, expr)) => eval(pos, expr)
                 }
-              globalDefs(name) = VarDef(typ, const) // todo: actual type should be declared, with possible conversion
+
+              val typ1 =
+                dtyp match {
+                  case None => typ
+                  case Some(ddt) =>
+                    (datatype(ddt._1, ddt._2), typ) match {
+                      case (dt @ PointerType(t), PointerType(ArrayType(_, u))) =>
+                        if (t == u)
+                          dt
+                        else
+                          problem(dtyp.get._1, "type parameters are not the same type")
+                    }
+                }
+
+              globalDefs(name) = VarDef(typ1, const, typ) // todo: actual type should be declared, with possible conversion
           }
+
           init map (_._2) foreach strings
       }
 
@@ -127,8 +149,11 @@ object CodeGenerator {
         case DefAST(_, name, FunctionPieceAST(_, ret, parms, arb, parts, where)) =>
           compileFunction(name, ret, parms, arb, parts, where)
         case VarAST(pos, name, _, _) =>
-          val VarDef(typ, const) = globalDefs(name).asInstanceOf[VarDef]
-
+          val VarDef(typ, const, ctyp) = globalDefs(name).asInstanceOf[VarDef]
+//          val const1 =
+//            if (typ == ctyp)
+//              const
+//            else
           line(s"@$name = global $typ $const")
       }
 
@@ -142,61 +167,67 @@ object CodeGenerator {
         case a: Boolean => (a, BoolType)
       }
 
-    def eval(pos: Position, expr: ExpressionAST): (Any, Type) = {
-      def numeric(expr: ExpressionAST) =
-        eval(pos, expr) match {
-          case r @ (_, _: NumericType) => r
-          case _                       => problem(pos, "none numeric type")
-        }
-
-      expr match {
-        case LiteralExpressionAST(v: Char)    => literal(v)
-        case LiteralExpressionAST(v: Int)     => literal(v)
-        case LiteralExpressionAST(v: Double)  => literal(v)
-        case UnaryExpressionAST("+", _, expr) => numeric(expr)
-        case UnaryExpressionAST("-", _, expr) =>
-          numeric(expr) match {
-            case (value: Int, typ)    => (-value, typ)
-            case (value: Long, typ)   => (-value, typ)
-            case (value: Char, _)     => (-value, IntType)
-            case (value: Double, typ) => (-value, typ)
+    def eval(pos: Position, expr: ExpressionAST) = {
+      def eval(expr: ExpressionAST): (Any, Type) = {
+        def numeric(expr: ExpressionAST) =
+          eval(expr) match {
+            case r @ (_, _: NumericType) => r
+            case _                       => problem(pos, "non-numeric type")
           }
-        case UnaryExpressionAST(op, _, _) => problem(pos, s"invalid unary operator: '$op'")
-        case BinaryExpressionAST(lpos, left, op, rpos, right) =>
-          val l = numeric(left)
-          val r = numeric(right)
-          val (l1, r1) =
-            (l, r) match {
-              case _ if l._2 == r._2                => (l, r)
-              case ((_: Double, tl), (vr: Long, _)) => (l, (vr.toDouble, tl))
-              case ((vl: Long, _), (_: Double, tr)) => ((vl.toDouble, tr), r)
-              case ((_: Long, tl), (vr: Int, _))    => (l, (vr.toLong, tl))
-              case ((vl: Int, _), (_: Long, tr))    => ((vl.toLong, tr), r)
-              case ((_: Double, tl), (vr: Int, _))  => (l, (vr.toDouble, tl))
-              case ((vl: Int, _), (_: Double, tr))  => ((vl.toDouble, tr), r)
-              case ((_: Int, tl), (vr: Char, _))    => (l, (vr.toInt, tl))
-              case ((vl: Char, _), (_: Int, tr))    => ((vl.toInt, tr), r)
+
+        expr match {
+          case LiteralExpressionAST(v: Char)    => literal(v)
+          case LiteralExpressionAST(v: Int)     => literal(v)
+          case LiteralExpressionAST(v: Double)  => literal(v)
+          case UnaryExpressionAST("+", _, expr) => numeric(expr)
+          case UnaryExpressionAST("-", _, expr) =>
+            numeric(expr) match {
+              case (value: Int, typ)    => (-value, typ)
+              case (value: Long, typ)   => (-value, typ)
+              case (value: Char, _)     => (-value, IntType)
+              case (value: Double, typ) => (-value, typ)
             }
+          case UnaryExpressionAST(op, _, _) => problem(pos, s"invalid unary operator: '$op'")
+          case BinaryExpressionAST(lpos, left, op, rpos, right) =>
+            val l = numeric(left)
+            val r = numeric(right)
+            val (l1, r1) =
+              (l, r) match {
+                case _ if l._2 == r._2                => (l, r)
+                case ((_: Double, tl), (vr: Long, _)) => (l, (vr.toDouble, tl))
+                case ((vl: Long, _), (_: Double, tr)) => ((vl.toDouble, tr), r)
+                case ((_: Long, tl), (vr: Int, _))    => (l, (vr.toLong, tl))
+                case ((vl: Int, _), (_: Long, tr))    => ((vl.toLong, tr), r)
+                case ((_: Double, tl), (vr: Int, _))  => (l, (vr.toDouble, tl))
+                case ((vl: Int, _), (_: Double, tr))  => ((vl.toDouble, tr), r)
+                case ((_: Int, tl), (vr: Char, _))    => (l, (vr.toInt, tl))
+                case ((vl: Char, _), (_: Int, tr))    => ((vl.toInt, tr), r)
+              }
 
-          (l1, op, r1) match {
-            case ((a: Int, t), "+", (b: Int, _)) =>
-              (a + b, t) // todo: have to be able to handle constant pointer arithmetic
-            case ((a: Int, t), "-", (b: Int, _))       => (a - b, t)
-            case ((a: Int, t), "*", (b: Int, _))       => (a * b, t)
-            case ((a: Int, t), "/", (b: Int, _))       => (a / b, t)
-            case ((a: Int, t), "mod", (b: Int, _))     => (a % b, t)
-            case ((a: Long, t), "+", (b: Long, _))     => (a + b, t)
-            case ((a: Long, t), "-", (b: Long, _))     => (a - b, t)
-            case ((a: Long, t), "*", (b: Long, _))     => (a * b, t)
-            case ((a: Long, t), "/", (b: Long, _))     => (a / b, t)
-            case ((a: Long, t), "mod", (b: Long, _))   => (a % b, t)
-            case ((a: Double, t), "+", (b: Double, _)) => (a + b, t)
-            case ((a: Double, t), "-", (b: Double, _)) => (a - b, t)
-            case ((a: Double, t), "*", (b: Double, _)) => (a * b, t)
-            case ((a: Double, t), "/", (b: Double, _)) => (a / b, t)
-          }
-        case _ => problem(pos, s"initializer not compile-time constant")
+            (l1, op, r1) match {
+              case ((a: Int, t), "+", (b: Int, _)) =>
+                (a + b, t) // todo: have to be able to handle constant pointer arithmetic
+              case ((a: Int, t), "-", (b: Int, _))       => (a - b, t)
+              case ((a: Int, t), "*", (b: Int, _))       => (a * b, t)
+              case ((a: Int, t), "/", (b: Int, _))       => (a / b, t)
+              case ((a: Int, t), "mod", (b: Int, _))     => (a % b, t)
+              case ((a: Long, t), "+", (b: Long, _))     => (a + b, t)
+              case ((a: Long, t), "-", (b: Long, _))     => (a - b, t)
+              case ((a: Long, t), "*", (b: Long, _))     => (a * b, t)
+              case ((a: Long, t), "/", (b: Long, _))     => (a / b, t)
+              case ((a: Long, t), "mod", (b: Long, _))   => (a % b, t)
+              case ((a: Double, t), "+", (b: Double, _)) => (a + b, t)
+              case ((a: Double, t), "-", (b: Double, _)) => (a - b, t)
+              case ((a: Double, t), "*", (b: Double, _)) => (a * b, t)
+              case ((a: Double, t), "/", (b: Double, _)) => (a / b, t)
+            }
+          case _ => problem(pos, s"initializer not compile-time constant")
+        }
       }
+
+      val (v, t) = eval(expr)
+
+      (v.toString, t)
     }
 
     def compileFunction(name: String,
@@ -365,14 +396,15 @@ object CodeGenerator {
               val (value, typ) = compileExpression(true, expr)
 
               typ match {
-                case PointerType(pointee) =>
+                case PointerType(pointee) if pointee.firstclass =>
                   if (rvalue) {
                     operation(s"load $pointee, $typ $value")
                     pointee
                   } else {
                     typ
                   }
-                case _ => problem(epos, "expression does not return a pointer")
+                case _: PointerType => problem(epos, "only pointers to LLVM 'first class' types can be dereferenced")
+                case _              => problem(epos, "expression does not return a pointer")
               }
             case BinaryExpressionAST(lpos, left, op, rpos, right) =>
               compileBinaryExpression(lpos, left, op, rpos, right)
@@ -382,7 +414,7 @@ object CodeGenerator {
             case LiteralExpressionAST(s: String) =>
               operation(
                 s"getelementptr inbounds [${s.length + 1} x i8], [${s.length + 1} x i8]* @.str.${stringMap(s)}, i64 0, i64 0")
-              PointerType(ByteType)
+              PointerType(BCharType)
             case LiteralExpressionAST(v: Any) =>
               val (value, typ) = literal(v)
 
@@ -404,7 +436,7 @@ object CodeGenerator {
               rtyp
             case VariableExpressionAST(pos, name) =>
               globalDefs get name match {
-                case Some(VarDef(typ, _)) =>
+                case Some(VarDef(typ, _, _)) =>
                   if (rvalue) {
                     operation(s"load $typ, $typ* @$name")
                     typ
@@ -429,10 +461,11 @@ object CodeGenerator {
               }
             case AddressExpressionAST(pos, name) =>
               globalDefs get name match {
-                case Some(VarDef(typ, _)) =>
+                case Some(VarDef(typ, _, _)) =>
                   expval = s"@$name"
                   PointerType(typ)
-                case None => problem(pos, s"undefined: $name")
+                case Some(_) => problem(pos, "not yet implemented")
+                case None    => problem(pos, s"undefined: $name")
               }
             case ApplyExpressionAST(fpos, VariableExpressionAST(_, "print"), apos, args, tailrecursive) =>
               indent(
@@ -447,18 +480,21 @@ object CodeGenerator {
                     val (a, at) = compileExpression(true, arg)
 
                     at match {
+                      case BCharType =>
+                        operation(
+                          s"call i32 (i8*, ...) $printf (i8* getelementptr inbounds ([3 x i8], [3 x i8]* @.char.format, i64 0, i64 0), i8 $a)")
                       case IntType =>
                         operation(
                           s"call i32 (i8*, ...) $printf (i8* getelementptr inbounds ([3 x i8], [3 x i8]* @.int.format, i64 0, i64 0), i32 $a)")
                       case DoubleType =>
                         operation(
                           s"call i32 (i8*, ...) $printf (i8* getelementptr inbounds ([3 x i8], [3 x i8]* @.double.format, i64 0, i64 0), double $a)")
-                      case PointerType(ByteType) =>
+                      case PointerType(BCharType) | PointerType(ArrayType(_, BCharType)) =>
                         val LiteralExpressionAST(s: String) = arg
 
                         operation(
                           s"call i32 (i8*, ...) $printf (i8* getelementptr inbounds ([3 x i8], [3 x i8]* @.str.format, i64 0, i64 0), i8* $a)")
-                      case _ => problem(pos, "don't know how to print that (yet)")
+                      case _ => problem(pos, s"don't know how to print that type (yet): $at")
                     }
 
                     if (tl nonEmpty)
@@ -530,8 +566,8 @@ object CodeGenerator {
   }
 
   abstract class Def { val typ: Type }
-  case class VarDef(typ: Type, const: Any)  extends Def
-  case class FunctionDef(typ: FunctionType) extends Def
+  case class VarDef(typ: Type, const: String, ctyp: Type) extends Def
+  case class FunctionDef(typ: FunctionType)               extends Def
 
   class Counter {
 
