@@ -59,12 +59,13 @@ object CodeGenerator {
 
     def strings(ast: AST): Unit =
       ast match {
+        case DerefExpressionAST(_, _, expr)   => strings(expr)
         case PreExpressionAST(op, pos, expr)  => strings(expr)
         case PostExpressionAST(op, pos, expr) => strings(expr)
         case LiteralExpressionAST(s: String) =>
           line(s"""@.str.${stringMap.size} = private unnamed_addr constant [${s.length + 1} x i8] c"$s\00", align 1""")
           stringMap(s) = stringMap.size
-        case LiteralExpressionAST(_) | VariableExpressionAST(_, _) =>
+        case _: LiteralExpressionAST | _: VariableExpressionAST | _: AddressExpressionAST =>
         case AssignmentExpressionAST(lhs, _, rhs) =>
           lhs foreach { case (_, e) => strings(e) }
           rhs foreach { case (_, e) => strings(e) }
@@ -107,7 +108,12 @@ object CodeGenerator {
             case None =>
               val (const, typ) =
                 init match {
-                  case None              => (0, datatype(pos, dtyp._2))
+                  case None => (0, datatype(pos, dtyp._2))
+                  case Some((pos, AddressExpressionAST(apos, name))) =>
+                    globalDefs get name match {
+                      case Some(d: Def) => (s"@$name", datatype(pos, dtyp._2))
+                      case None         => problem(pos, s"unknown variable: $name")
+                    }
                   case Some((pos, expr)) => eval(pos, expr)
                 }
               globalDefs(name) = VarDef(typ, const) // todo: actual type should be declared, with possible conversion
@@ -422,8 +428,12 @@ object CodeGenerator {
                   }
               }
             case AddressExpressionAST(pos, name) =>
-              expval = s"@$name"
-              PointerType(typ)
+              globalDefs get name match {
+                case Some(VarDef(typ, _)) =>
+                  expval = s"@$name"
+                  PointerType(typ)
+                case None => problem(pos, s"undefined: $name")
+              }
             case ApplyExpressionAST(fpos, VariableExpressionAST(_, "print"), apos, args, tailrecursive) =>
               indent(
                 s"store i32 (i8*, ...)* @printf, i32 (i8*, ...)** ${operation("alloca i32 (i8*, ...)*, align 8")}, align 8")
