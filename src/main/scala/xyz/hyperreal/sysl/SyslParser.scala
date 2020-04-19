@@ -179,10 +179,12 @@ class SyslLexical
     "and",
     "break",
     "by",
+    "char",
     "continue",
     "def",
     "div",
     "do",
+    "double",
     "elif",
     "else",
     "enum",
@@ -190,6 +192,8 @@ class SyslLexical
     "for",
     "if",
     "import",
+    "int",
+    "long",
     "match",
     "mod",
     "not",
@@ -202,6 +206,7 @@ class SyslLexical
     "then",
     "true",
     "type",
+    "unit",
     "until",
     "val",
     "var",
@@ -381,7 +386,7 @@ class SyslParser extends StandardTokenParsers with PackratParsers {
       "var" ~> Indent ~> rep1(variable <~ Newline) <~ Dedent ^^ DeclarationBlockAST
 
   lazy val variable: PackratParser[VarAST] =
-    pos ~ ident ~ opt(":" ~> pos ~ ident) ~ opt("=" ~> pos ~ noAssignmentExpressionOrBlock) ^^ {
+    pos ~ ident ~ opt(":" ~> pos ~ datatype) ~ opt("=" ~> pos ~ noAssignmentExpressionOrBlock) ^^ {
       case p ~ n ~ None ~ None                 => VarAST(p, n, None, None)
       case p ~ n ~ None ~ Some(pe ~ e)         => VarAST(p, n, None, Some((pe, e)))
       case p ~ n ~ Some(pt ~ t) ~ None         => VarAST(p, n, Some((pt, t)), None)
@@ -399,7 +404,7 @@ class SyslParser extends StandardTokenParsers with PackratParsers {
       "def" ~> Indent ~> rep1(definition <~ Newline) <~ Dedent ^^ DeclarationBlockAST
 
   lazy val definition: PackratParser[DefAST] =
-    pos ~ ident ~ opt("(" ~> rep1sep(pattern, ",") ~ opt("...") <~ ")") ~ opt(":" ~> pos ~ ident ^^ {
+    pos ~ ident ~ opt("(" ~> rep1sep(pattern, ",") ~ opt("...") <~ ")") ~ opt(":" ~> pos ~ datatype ^^ {
       case p ~ i => (p, i)
     }) ~ (optionallyGuardedPart | guardedParts) ^^ {
       case p ~ n ~ None ~ r ~ ((gs, w)) =>
@@ -792,7 +797,7 @@ class SyslParser extends StandardTokenParsers with PackratParsers {
       typePattern
 
   lazy val typePattern: PackratParser[PatternAST] =
-    primaryPattern ~ ":" ~ pos ~ ident ^^ { case pat ~ _ ~ p ~ typename => TypePatternAST(p, pat, typename) } |
+    primaryPattern ~ ":" ~ pos ~ datatype ^^ { case pat ~ _ ~ p ~ typename => TypePatternAST(pat, p, typename) } |
       primaryPattern
 
   lazy val primaryPattern: PackratParser[PatternAST] =
@@ -808,12 +813,24 @@ class SyslParser extends StandardTokenParsers with PackratParsers {
         case p ~ e ~ l => TuplePatternAST(p, e +: l)
       } |
       "(" ~> pattern <~ ")"
+
+  lazy val datatype: PackratParser[DatatypeAST] =
+    pointerDatatype
+
+  lazy val pointerDatatype: PackratParser[DatatypeAST] =
+    pointerDatatype <~ "*" ^^ PointerTypeAST |
+      simpleDatatype
+
+  lazy val simpleDatatype: PackratParser[DatatypeAST] =
+    "int" ^^^ IntTypeAST |
+      "long" ^^^ LongTypeAST |
+      "double" ^^^ DoubleTypeAST |
+      "char" ^^^ CharTypeAST |
+      "unit" ^^^ UnitTypeAST
 }
 
-//todo: cset operations + (including adding string to cset), -, *, - (complement)
 //todo: bitwise operations: &&, ||, ^^, ~, <<, >>, >>>
 //todo: mutable record fields (!r on lhs should generate l-values of record fields)
-//todo: set operations +, -, *, - (complement)
 //todo: add +.. and -.. for ranges
 //todo: Nim style named arguments
 //todo: var a, b, c

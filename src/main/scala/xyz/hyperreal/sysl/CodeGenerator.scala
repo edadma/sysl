@@ -37,12 +37,24 @@ object CodeGenerator {
       src.stmts foreach compileTopLevelStatementPass2
     }
 
-    def typeFromString(typ: String): Type =
-      typ match {
-        case "Int"    => IntType
-        case "Long"   => LongType
-        case "Double" => DoubleType
-        case "Char"   => CharType
+//    def typeFromString(typ: String): Type =
+//      typ match {
+//        case "int"    => IntType
+//        case "long"   => LongType
+//        case "double" => DoubleType
+//        case "char"   => CharType
+//        case "unit"   => UnitType
+//      }
+
+    def datatype(pos: Position, datatypeAST: DatatypeAST): Type =
+      datatypeAST match {
+        case IntTypeAST          => IntType
+        case CharTypeAST         => CharType
+        case LongTypeAST         => LongType
+        case UnitTypeAST         => UnitType
+        case DoubleTypeAST       => DoubleType
+        case IdentTypeAST(name)  => problem(pos, s"unknown type '$name'")
+        case PointerTypeAST(typ) => PointerType(datatype(pos, typ))
       }
 
     def strings(ast: AST): Unit =
@@ -85,8 +97,8 @@ object CodeGenerator {
       stmt match {
         case DeclarationBlockAST(decls) => decls foreach compileTopLevelStatementPass1
         case DefAST(_, name, FunctionPieceAST(_, ret, parms, arb, parts, where)) =>
-          globalDefs(name) = FunctionDef(FunctionType(typeFromString(ret.get._2), parms map {
-            case TypePatternAST(_, _, typename) => typeFromString(typename)
+          globalDefs(name) = FunctionDef(FunctionType(datatype(ret.get._1, ret.get._2), parms map {
+            case TypePatternAST(_, pos, typename) => datatype(pos, typename)
           }, arb))
           parts foreach strings
         case VarAST(pos, name, Some(dtyp), init) => // todo: variable type
@@ -95,7 +107,7 @@ object CodeGenerator {
             case None =>
               val (const, typ) =
                 init match {
-                  case None              => (0, typeFromString(dtyp._2))
+                  case None              => (0, datatype(pos, dtyp._2))
                   case Some((pos, expr)) => eval(pos, expr)
                 }
               globalDefs(name) = VarDef(typ, const) // todo: actual type should be declared, with possible conversion
@@ -181,7 +193,7 @@ object CodeGenerator {
     }
 
     def compileFunction(name: String,
-                        ret: Option[(Position, String)],
+                        ret: Option[(Position, DatatypeAST)],
                         parms: List[PatternAST],
                         arb: Boolean,
                         parts: List[FunctionPart],
@@ -190,9 +202,9 @@ object CodeGenerator {
       val blockCounter = new Counter
       val parmMap =
         mutable.LinkedHashMap[String, Type](parms map {
-          case VariablePatternAST(pos, name)                                 => name -> null
-          case TypePatternAST(tpos, VariablePatternAST(pos, name), typename) => name -> typeFromString(typename)
-          case p: PatternAST                                                 => problem(p.pos, s"pattern type not implemented yet: $p")
+          case VariablePatternAST(pos, name)                            => name -> null
+          case TypePatternAST(VariablePatternAST(pos, name), tpos, typ) => name -> datatype(tpos, typ)
+          case p: PatternAST                                            => problem(p.pos, s"pattern type not implemented yet: $p")
         }: _*)
       var expval: String = "undef"
 
@@ -476,8 +488,9 @@ object CodeGenerator {
         (if (typ == UnitType) UnitType.void else expval, typ)
       }
 
+      // todo: assuming return type was given
       line(
-        s"define ${typeFromString(ret.get._2)} @" ++ name ++ s"(${parmMap map { case (k, v) => s"$v %$k" } mkString ", "}) {")
+        s"define ${datatype(ret.get._1, ret.get._2)} @" ++ name ++ s"(${parmMap map { case (k, v) => s"$v %$k" } mkString ", "}) {")
       line("entry:")
 
       val (v, t) = compileExpression(true, parts.head.body)

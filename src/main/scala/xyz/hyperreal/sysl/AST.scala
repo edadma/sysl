@@ -19,7 +19,10 @@ case class EnumAST(name: String, pos: Position, enumeration: List[(String, Optio
 //case class NativeAST( pkg: String, name: List[(String, Option[String])] ) extends DeclarationStatementAST
 //case class FunctionAST( cls: String, name: List[(String, Option[String])] ) extends DeclarationStatementAST
 case class ValAST(pat: PatternAST, pos: Position, expr: ExpressionAST) extends DeclarationStatementAST
-case class VarAST(pos: Position, name: String, typ: Option[(Position, String)], init: Option[(Position, ExpressionAST)])
+case class VarAST(pos: Position,
+                  name: String,
+                  typ: Option[(Position, DatatypeAST)],
+                  init: Option[(Position, ExpressionAST)])
     extends DeclarationStatementAST
 case class DefAST(pos: Position, name: String, func: FunctionPieceAST) extends DeclarationStatementAST
 case class DeclarationBlockAST(decls: List[DeclarationStatementAST])   extends DeclarationStatementAST
@@ -112,7 +115,7 @@ case class InterpolationExpressionAST(l: List[ExpressionAST])                   
 case class FunctionExpressionAST(pieces: List[FunctionPieceAST])                                 extends ExpressionAST
 case class FunctionPieceAST(
     pos: Position,
-    ret: Option[(Position, String)],
+    ret: Option[(Position, DatatypeAST)],
     parms: List[PatternAST],
     arb: Boolean,
     parts: List[FunctionPart],
@@ -124,8 +127,17 @@ case class FunctionPart(guard: Option[ExpressionAST], body: ExpressionAST) exten
 abstract class PatternAST                                                        extends AST { val pos: Position }
 case class NamedPatternAST(pos: Position, var alias: String, pat: PatternAST)    extends PatternAST
 case class VariablePatternAST(pos: Position, var name: String)                   extends PatternAST
-case class TypePatternAST(pos: Position, s: PatternAST, typename: String)        extends PatternAST
+case class TypePatternAST(s: PatternAST, pos: Position, datatype: DatatypeAST)   extends PatternAST
 case class TuplePatternAST(pos: Position, elems: List[PatternAST])               extends PatternAST
 case class LiteralPatternAST(pos: Position, lit: Any)                            extends PatternAST
 case class AlternationPatternAST(pos: Position, alts: List[PatternAST])          extends PatternAST
 case class RecordPatternAST(pos: Position, name: String, args: List[PatternAST]) extends PatternAST
+
+abstract class DatatypeAST                  extends AST
+case object IntTypeAST                      extends DatatypeAST
+case object LongTypeAST                     extends DatatypeAST
+case object DoubleTypeAST                   extends DatatypeAST
+case object CharTypeAST                     extends DatatypeAST
+case object UnitTypeAST                     extends DatatypeAST
+case class IdentTypeAST(name: String)       extends DatatypeAST
+case class PointerTypeAST(typ: DatatypeAST) extends DatatypeAST
