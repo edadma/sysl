@@ -173,7 +173,8 @@ object CodeGenerator {
             }
 
           (l1, op, r1) match {
-            case ((a: Int, t), "+", (b: Int, _))       => (a + b, t)
+            case ((a: Int, t), "+", (b: Int, _)) =>
+              (a + b, t) // todo: have to be able to handle constant pointer arithmetic
             case ((a: Int, t), "-", (b: Int, _))       => (a - b, t)
             case ((a: Int, t), "*", (b: Int, _))       => (a * b, t)
             case ((a: Int, t), "/", (b: Int, _))       => (a / b, t)
@@ -354,7 +355,19 @@ object CodeGenerator {
 
               operation(s"sub $typ 0, $operand")
               typ
-//            case UnaryExpressionAST("*", pos, expr) =>
+            case DerefExpressionAST(pos, epos, expr) =>
+              val (value, typ) = compileExpression(true, expr)
+
+              typ match {
+                case PointerType(pointee) =>
+                  if (rvalue) {
+                    operation(s"load $pointee, $typ $value")
+                    pointee
+                  } else {
+                    typ
+                  }
+                case _ => problem(epos, "expression does not return a pointer")
+              }
             case BinaryExpressionAST(lpos, left, op, rpos, right) =>
               compileBinaryExpression(lpos, left, op, rpos, right)
             case BlockExpressionAST(stmts) =>
@@ -408,6 +421,9 @@ object CodeGenerator {
                       problem(pos, s"unknown identifier: $name")
                   }
               }
+            case AddressExpressionAST(pos, name) =>
+              expval = s"@$name"
+              PointerType(typ)
             case ApplyExpressionAST(fpos, VariableExpressionAST(_, "print"), apos, args, tailrecursive) =>
               indent(
                 s"store i32 (i8*, ...)* @printf, i32 (i8*, ...)** ${operation("alloca i32 (i8*, ...)*, align 8")}, align 8")

@@ -1,6 +1,6 @@
-var v: Int = 1
+var v: int = 1
 
-def main: Int
+def main: int
     while v <= 5
         print(v)
         v = v + 1

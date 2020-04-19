@@ -720,7 +720,7 @@ class SyslParser extends StandardTokenParsers with PackratParsers {
       "*" ~> pos ~ incrementExpression ^^ {
         case _ ~ LiteralExpressionAST(n: Int)    => LiteralExpressionAST(-n)
         case _ ~ LiteralExpressionAST(n: Double) => LiteralExpressionAST(-n)
-        case p ~ v                               => UnaryExpressionAST("*", p, v)
+        case p ~ v                               => DerefExpressionAST(null, p, v)
       } |
 //      "." ~> incrementExpression ^^ DereferenceExpressionAST |
       incrementExpression
@@ -745,13 +745,18 @@ class SyslParser extends StandardTokenParsers with PackratParsers {
     } |
       pos ~ applyExpression ~ ("." ~> pos) ~ (ident | stringLit) ^^ {
         case fp ~ e ~ ap ~ f => DotExpressionAST(fp, e, ap, f)
-      } |
+      } | addressExpression
+
+  lazy val addressExpression: PackratParser[ExpressionAST] =
+    pos ~ "&" ~ ident ^^ {
+      case p ~ _ ~ n => AddressExpressionAST(p, n)
+    } |
       primaryExpression
 
-  lazy val mapEntry: PackratParser[(ExpressionAST, ExpressionAST)] = keyExpression ~ (":" ~> expression) ^^ {
-    case VariableExpressionAST(_, k) ~ v => LiteralExpressionAST(k) -> v
-    case k ~ v                           => (k, v)
-  }
+//  lazy val mapEntry: PackratParser[(ExpressionAST, ExpressionAST)] = keyExpression ~ (":" ~> expression) ^^ {
+//    case VariableExpressionAST(_, k) ~ v => LiteralExpressionAST(k) -> v
+//    case k ~ v                           => (k, v)
+//  }
 
   lazy val keyExpression: PackratParser[ExpressionAST] = additiveExpression
 

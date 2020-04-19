@@ -1,5 +1,6 @@
 var v: double = 5.2
+var p: double* = &v
 
 def main: int
-    print( v, v++, v )
+    print( *p )
     0
