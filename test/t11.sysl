@@ -1,5 +1,7 @@
 var p: bchar* = "asdf"
 
 def main: int
+    print( *p++ )
+    print( *p-- )
     print( *p )
     0

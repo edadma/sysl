@@ -35,6 +35,8 @@ object CodeGenerator {
       line("""@.str.format = private unnamed_addr constant [3 x i8] c"%s\00", align 1""")
       line("""@.nl.format = private unnamed_addr constant [2 x i8] c"\0A\00", align 1""")
       line("""@.comma.format = private unnamed_addr constant [3 x i8] c", \00", align 1""")
+      line("""@.bool.format = private unnamed_addr constant [5 x i8] c"bool(%d)\00", align 1""")
+      line("""@.null.format = private unnamed_addr constant [5 x i8] c"null\00", align 1""")
       line("declare i32 @printf(i8*, ...)")
       src.stmts foreach compileTopLevelStatementPass1
       src.stmts foreach compileTopLevelStatementPass2
@@ -280,48 +282,69 @@ object CodeGenerator {
       }
 
       def binaryExpression(lpos: Position, left: (String, Type), op: String, rpos: Position, right: (String, Type)) = {
-        val (l, tl) = left
-        val (r, tr) = right
-        val (rt, ol, or) =
-          (tl, tr) match {
-            case _ if tl == tr                             => (tl, l, r)
-            case (DoubleType, LongType)                    => (DoubleType, l, operation(s"sitofp i64 $r to double"))
-            case (LongType, DoubleType)                    => (DoubleType, operation(s"sitofp i64 $l to double"), r)
-            case (LongType, IntType)                       => (LongType, l, operation(s"sext i32 $r to i64"))
-            case (IntType, LongType)                       => (LongType, operation(s"sext i32 $l to i64"), r)
-            case (DoubleType, IntType)                     => (DoubleType, l, operation(s"sitofp i32 $r to double"))
-            case (IntType, DoubleType)                     => (DoubleType, operation(s"sitofp i32 $l to double"), r)
-            case (IntType, CharType) | (CharType, IntType) => (IntType, l, r)
-          }
+        (left, op, right) match {
+          case ((l, lt @ PointerType(ltp)), "+", (r, rt: IntegerType)) =>
+            operation(s"getelementptr $ltp, $lt $l, $rt $r")
+            lt
+          case ((l, lt @ PointerType(ltp)), "-", (r, rt: IntegerType)) =>
+            operation(s"getelementptr $ltp, $lt $l, $rt -$r")
+            lt
+          case ((l, lt: IntegerType), "+", (r, rt @ PointerType(rtp))) =>
+            operation(s"getelementptr $rtp, $rt $r, $lt $l")
+            rt
+          case ((l, lt: IntegerType), "-", (r, rt @ PointerType(rtp))) =>
+            operation(s"getelementptr $rtp, $rt $r, $lt -$l")
+            rt
+          case ((_, _: PointerType), _, (_, _: IntegerType)) | ((_, _: IntegerType), _, (_, _: PointerType)) =>
+            problem(lpos, "invalid operation for pointer arithmetic") // todo: op position should be used
+          case ((_, _: PointerType), _, (_, _: NumericType)) | ((_, _: NumericType), _, (_, _: PointerType)) =>
+            problem(lpos, "non-integer type used in pointer arithmetic") // todo: op position should be used
+          case _ =>
+            val (l, tl) = left
+            val (r, tr) = right
+            val (rt, ol, or) =
+              (tl, tr) match {
+                case _ if tl == tr                             => (tl, l, r)
+                case (DoubleType, LongType)                    => (DoubleType, l, operation(s"sitofp i64 $r to double"))
+                case (LongType, DoubleType)                    => (DoubleType, operation(s"sitofp i64 $l to double"), r)
+                case (LongType, IntType)                       => (LongType, l, operation(s"sext i32 $r to i64"))
+                case (IntType, LongType)                       => (LongType, operation(s"sext i32 $l to i64"), r)
+                case (DoubleType, IntType)                     => (DoubleType, l, operation(s"sitofp i32 $r to double"))
+                case (IntType, DoubleType)                     => (DoubleType, operation(s"sitofp i32 $l to double"), r)
+                case (IntType, CharType) | (CharType, IntType) => (IntType, l, r)
+                case (IntType, BCharType)                      => (IntType, l, operation(s"zext i8 $r to i32"))
+                case (BCharType, IntType)                      => (IntType, operation(s"zext i8 $l to i32"), r)
+              }
 
-        val inst =
-          (rt, op) match {
-            case (_: IntegerType, "+")   => "add"
-            case (_: FloatType, "+")     => "fadd"
-            case (_: IntegerType, "-")   => "sub"
-            case (_: FloatType, "-")     => "fsub"
-            case (_: IntegerType, "*")   => "mul"
-            case (_: FloatType, "*")     => "fmul"
-            case (_: IntegerType, "/")   => "sdiv"
-            case (_: FloatType, "/")     => "fdiv"
-            case (_: IntegerType, "mod") => "srem"
-            case (_: FloatType, "mod")   => "frem"
-            case (_: IntegerType, "==")  => "icmp eq" // todo: unsigned comparisons?
-            case (_: FloatType, "==")    => "fcmp ueq"
-            case (_: IntegerType, "!=")  => "icmp ne"
-            case (_: FloatType, "!=")    => "fcmp une"
-            case (_: IntegerType, "<")   => "icmp slt"
-            case (_: FloatType, "<")     => "fcmp ult"
-            case (_: IntegerType, "<=")  => "icmp sle"
-            case (_: FloatType, "<=")    => "fcmp ule"
-            case (_: IntegerType, ">")   => "icmp sgt"
-            case (_: FloatType, ">")     => "fcmp ugt"
-            case (_: IntegerType, ">=")  => "icmp sge"
-            case (_: FloatType, ">=")    => "fcmp uge"
-          }
+            val inst =
+              (rt, op) match {
+                case (_: IntegerType, "+")   => "add"
+                case (_: FloatType, "+")     => "fadd"
+                case (_: IntegerType, "-")   => "sub"
+                case (_: FloatType, "-")     => "fsub"
+                case (_: IntegerType, "*")   => "mul"
+                case (_: FloatType, "*")     => "fmul"
+                case (_: IntegerType, "/")   => "sdiv"
+                case (_: FloatType, "/")     => "fdiv"
+                case (_: IntegerType, "mod") => "srem"
+                case (_: FloatType, "mod")   => "frem"
+                case (_: IntegerType, "==")  => "icmp eq" // todo: unsigned comparisons?
+                case (_: FloatType, "==")    => "fcmp ueq"
+                case (_: IntegerType, "!=")  => "icmp ne"
+                case (_: FloatType, "!=")    => "fcmp une"
+                case (_: IntegerType, "<")   => "icmp slt"
+                case (_: FloatType, "<")     => "fcmp ult"
+                case (_: IntegerType, "<=")  => "icmp sle"
+                case (_: FloatType, "<=")    => "fcmp ule"
+                case (_: IntegerType, ">")   => "icmp sgt"
+                case (_: FloatType, ">")     => "fcmp ugt"
+                case (_: IntegerType, ">=")  => "icmp sge"
+                case (_: FloatType, ">=")    => "fcmp uge"
+              }
 
-        operation(s"$inst $rt $ol, $or")
-        rt
+            operation(s"$inst $rt $ol, $or")
+            rt
+        }
       }
 
       def compileExpression(rvalue: Boolean, expr: ExpressionAST): (String, Type) = {
@@ -484,6 +507,8 @@ object CodeGenerator {
                     val (a, at) = compileExpression(true, arg)
 
                     at match {
+                      case BoolType =>
+                        operation(s"call i32 (i8*, ...) $printf (i8* bitcast ([9 x i8]* @.bool.format to i8*), i1 $a)")
                       case BCharType =>
                         operation(s"call i32 (i8*, ...) $printf (i8* bitcast ([3 x i8]* @.char.format to i8*), i8 $a)")
                       case IntType =>
