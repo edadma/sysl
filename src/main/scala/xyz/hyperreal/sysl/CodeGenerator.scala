@@ -35,7 +35,7 @@ object CodeGenerator {
       line("""@.str.format = private unnamed_addr constant [3 x i8] c"%s\00", align 1""")
       line("""@.nl.format = private unnamed_addr constant [2 x i8] c"\0A\00", align 1""")
       line("""@.comma.format = private unnamed_addr constant [3 x i8] c", \00", align 1""")
-      line("""@.bool.format = private unnamed_addr constant [5 x i8] c"bool(%d)\00", align 1""")
+      line("""@.bool.format = private unnamed_addr constant [9 x i8] c"bool(%d)\00", align 1""")
       line("""@.null.format = private unnamed_addr constant [5 x i8] c"null\00", align 1""")
       line("declare i32 @printf(i8*, ...)")
       src.stmts foreach compileTopLevelStatementPass1
