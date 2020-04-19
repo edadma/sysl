@@ -21,6 +21,8 @@ object CodeGenerator {
       line(s)
     }
 
+    def cast(rtyp: Type, value: String, typ: Type) = s"bitcast ($typ $value to $rtyp)"
+
     def position(pos: Position): Unit = {
       indent(s"; ${pos.line}:${pos.column}")
       indent(s"; ${pos.longString.replace("\n", "\n  ; ")}")
@@ -150,11 +152,13 @@ object CodeGenerator {
           compileFunction(name, ret, parms, arb, parts, where)
         case VarAST(pos, name, _, _) =>
           val VarDef(typ, const, ctyp) = globalDefs(name).asInstanceOf[VarDef]
-//          val const1 =
-//            if (typ == ctyp)
-//              const
-//            else
-          line(s"@$name = global $typ $const")
+          val const1 =
+            if (typ == ctyp)
+              const
+            else
+              cast(typ, const, ctyp)
+
+          line(s"@$name = global $typ $const1")
       }
 
     def literal(v: Any): (Any, Type) =
@@ -481,32 +485,27 @@ object CodeGenerator {
 
                     at match {
                       case BCharType =>
-                        operation(
-                          s"call i32 (i8*, ...) $printf (i8* getelementptr inbounds ([3 x i8], [3 x i8]* @.char.format, i64 0, i64 0), i8 $a)")
+                        operation(s"call i32 (i8*, ...) $printf (i8* bitcast ([3 x i8]* @.char.format to i8*), i8 $a)")
                       case IntType =>
-                        operation(
-                          s"call i32 (i8*, ...) $printf (i8* getelementptr inbounds ([3 x i8], [3 x i8]* @.int.format, i64 0, i64 0), i32 $a)")
+                        operation(s"call i32 (i8*, ...) $printf (i8* bitcast ([3 x i8]* @.int.format to i8*), i32 $a)")
                       case DoubleType =>
                         operation(
-                          s"call i32 (i8*, ...) $printf (i8* getelementptr inbounds ([3 x i8], [3 x i8]* @.double.format, i64 0, i64 0), double $a)")
+                          s"call i32 (i8*, ...) $printf (i8* bitcast ([3 x i8]* @.double.format to i8*), double $a)")
                       case PointerType(BCharType) | PointerType(ArrayType(_, BCharType)) =>
                         val LiteralExpressionAST(s: String) = arg
 
-                        operation(
-                          s"call i32 (i8*, ...) $printf (i8* getelementptr inbounds ([3 x i8], [3 x i8]* @.str.format, i64 0, i64 0), i8* $a)")
+                        operation(s"call i32 (i8*, ...) $printf (i8* bitcast ([3 x i8]* @.str.format to i8*), i8* $a)")
                       case _ => problem(pos, s"don't know how to print that type (yet): $at")
                     }
 
                     if (tl nonEmpty)
-                      operation(
-                        s"call i32 (i8*, ...) $printf (i8* getelementptr inbounds ([3 x i8], [3 x i8]* @.comma.format, i64 0, i64 0))")
+                      operation(s"call i32 (i8*, ...) $printf (i8* bitcast ([3 x i8]* @.comma.format to i8*))")
 
                     printargs(tl)
                 }
 
               printargs(args)
-              operation(
-                s"call i32 (i8*, ...) $printf (i8* getelementptr inbounds ([2 x i8], [2 x i8]* @.nl.format, i64 0, i64 0))")
+              operation(s"call i32 (i8*, ...) $printf (i8* bitcast ([2 x i8]* @.nl.format to i8*))")
               UnitType
             case ApplyExpressionAST(fpos, f, apos, args, tailrecursive) =>
               val (func, ftyp) = compileExpression(true, f)
