@@ -1,6 +1,6 @@
-var v: Int = 123
+var v: int = 123
 
-def main: Int
+def main: int
     print(v)
     v = v + 1
     print(v)

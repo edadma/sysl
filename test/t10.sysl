@@ -1,5 +1,5 @@
-var v: int = 123
-var p: int* = &v
+var v = 123
+var p = &v
 
 def main: int
     print( *p )

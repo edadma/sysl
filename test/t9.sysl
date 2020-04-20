@@ -1,5 +1,7 @@
-var v: double = 5.2
+var x: double = 5.2
+var y: int = 5
 
 def main: int
-    print( v, v++, v )
+    print( x, x++, x, ++x, x )
+    print( y, y++, y, ++y, y )
     0

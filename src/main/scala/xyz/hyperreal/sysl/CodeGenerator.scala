@@ -125,7 +125,7 @@ object CodeGenerator {
                   case None => problem(pos, "need type or initializer (or both)")
                   case Some((pos, AddressExpressionAST(apos, name))) =>
                     globalDefs get name match {
-                      case Some(d: Def) => (s"@$name", d.typ)
+                      case Some(d: Def) => (s"@$name", PointerType(d.typ))
                       case None         => problem(pos, s"unknown variable: $name")
                     }
                   case Some((pos, LiteralExpressionAST(s: String))) =>

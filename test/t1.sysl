@@ -1,5 +1,5 @@
-def main: Int
+def main: int
     print( fib(7) )
     0
 
-def fib(x: Int): Int = if x == 0 then 0 elif x == 1 then 1 else fib(x - 1) + fib(x - 2)
+def fib(x: int): int = if x < 2 then x else fib(x - 1) + fib(x - 2)

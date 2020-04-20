@@ -1,3 +1,3 @@
-def main: Int
-    print(if true then 3 else 4)
+def main: int
+    print(if false then 3 else 4)
     0

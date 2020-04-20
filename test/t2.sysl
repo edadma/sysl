@@ -1,5 +1,5 @@
-def main: Int
-    if true
+def main: int
+    if false
         print( 123 )
     elif false
         print( 2 )

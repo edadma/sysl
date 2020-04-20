@@ -6,8 +6,6 @@ def main: int
 
   while (c = *p++) != 0
     print( c )
-//  while *p != 0
-//    print( *p++ )
 
   p = "zxcv"
 
