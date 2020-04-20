@@ -252,10 +252,10 @@ object CodeGenerator {
       val blockCounter = new Counter
       val parmMap =
         mutable.LinkedHashMap[String, Type](parms map {
-          case VariablePatternAST(pos, name)                            => name -> null
           case TypePatternAST(VariablePatternAST(pos, name), tpos, typ) => name -> datatype(tpos, typ)
           case p: PatternAST                                            => problem(p.pos, s"pattern type not implemented yet: $p")
         }: _*)
+      val localMap       = new mutable.LinkedHashMap[String, Type]
       var expval: String = "undef"
 
       def operation(s: String) = {
@@ -275,8 +275,13 @@ object CodeGenerator {
 
       def compileStatement(stmt: StatementAST) =
         stmt match {
-          case _: DeclarationStatementAST => UnitType
-          case t: ExpressionAST           => compileExpression(true, t)._2
+          case VarAST(pos, name, typ, init) =>
+            if (parmMap.contains(name) || localMap.contains(name))
+              problem(pos, "duplicate definition")
+
+            //localMap(name) =
+            UnitType
+          case t: ExpressionAST => compileExpression(true, t)._2
         }
 
       def compileBinaryExpression(lpos: Position,
@@ -418,7 +423,7 @@ object CodeGenerator {
               if (!rvalue) // todo: flip the variable to lvalue
                 expval = null
 
-              UnitType // todo: get type correctly by looking all while body
+              UnitType // todo: get type correctly by looking at while body
             case UnaryExpressionAST("+", pos, expr) => compileExpression(true, expr)._2
             case UnaryExpressionAST("-", pos, expr) =>
               val (operand, typ) = compileExpression(true, expr)
