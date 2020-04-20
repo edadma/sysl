@@ -1,10 +1,13 @@
 var p: bchar*
+var c: bchar
 
 def main: int
   p = "asdf"
 
-  while *p != 0
-    print( *p++ )
+  while (c = *p++) != 0
+    print( c )
+//  while *p != 0
+//    print( *p++ )
 
   p = "zxcv"
 

@@ -574,7 +574,7 @@ object CodeGenerator {
               }
 
               indent(s"store $rtyp $rvalue, $ltyp $lvalue")
-              UnitType // should be the resulting value
+              rtyp
           }
 
         (if (typ == UnitType) UnitType.void else expval, typ)
