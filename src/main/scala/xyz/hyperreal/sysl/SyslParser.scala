@@ -520,12 +520,21 @@ class SyslParser extends StandardTokenParsers with PackratParsers {
     } |
       constructExpression
 
+  lazy val forIndex: PackratParser[(String, Option[TypeAST], ExpressionAST)] =
+    ident ~ opt(":" ~> datatype) ~ "=" ~ expression ^^ {
+      case v ~ t ~ _ ~ i => (v, t, i)
+    }
+
   lazy val constructExpression: PackratParser[ExpressionAST] =
     sendExpression ~ "match" ~ partialFunctionExpression ^^ {
       case e ~ _ ~ f => ApplyExpressionAST(null, f, null, List((null, e)), tailrecursive = false)
     } |
       "if" ~> pos ~ expression ~ ("then" ~> expressionOrBlock | blockExpression) ~ rep(elif) ~ elsePart ^^ {
         case p ~ c ~ t ~ ei ~ e => ConditionalExpressionAST((p, c, t) +: ei, e)
+      } |
+      opt(ident <~ ":") ~ "for" ~ opt(forIndex) ~ ";" ~ opt(expression) ~ ";" ~ opt(expression) ~ opt(
+        "do" ~> expressionOrBlock | blockExpression) ~ elsePart ^^ {
+        case l ~ _ ~ v ~ _ ~ t ~ _ ~ i ~ b ~ e => ForCStyleExpressionAST(l, v, t, i, b, e)
       } |
       opt(ident <~ ":") ~ ("for" ~> generators) ~ ("do" ~> expressionOrBlock | blockExpression) ~ elsePart ^^ {
         case l ~ g ~ b ~ e => ForExpressionAST(l, g, b, e)
@@ -820,14 +829,14 @@ class SyslParser extends StandardTokenParsers with PackratParsers {
       } |
       "(" ~> pattern <~ ")"
 
-  lazy val datatype: PackratParser[DatatypeAST] =
+  lazy val datatype: PackratParser[TypeAST] =
     pointerDatatype
 
-  lazy val pointerDatatype: PackratParser[DatatypeAST] =
+  lazy val pointerDatatype: PackratParser[TypeAST] =
     pointerDatatype <~ "*" ^^ PointerTypeAST |
       simpleDatatype
 
-  lazy val simpleDatatype: PackratParser[DatatypeAST] =
+  lazy val simpleDatatype: PackratParser[TypeAST] =
     "int" ^^^ IntTypeAST |
       "long" ^^^ LongTypeAST |
       "double" ^^^ DoubleTypeAST |

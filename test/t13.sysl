@@ -1,0 +1,7 @@
+var p: bchar* = "asdf"
+
+def main: int
+  for ; *p != 0; p++
+    print( *p )
+
+  0

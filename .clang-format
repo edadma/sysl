@@ -6,4 +6,3 @@ IndentWidth: 4
 Language: Cpp
 # Sorting includes breaks the build.
 SortIncludes: false
-...

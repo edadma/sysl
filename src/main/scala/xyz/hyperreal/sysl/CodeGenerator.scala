@@ -51,7 +51,7 @@ object CodeGenerator {
 //        case "unit"   => UnitType
 //      }
 
-    def datatype(pos: Position, datatypeAST: DatatypeAST): Type = {
+    def datatype(pos: Position, datatypeAST: TypeAST): Type = {
       datatypeAST match {
         case IntTypeAST          => IntType
         case BCharTypeAST        => BCharType
@@ -66,6 +66,12 @@ object CodeGenerator {
 
     def strings(ast: AST): Unit =
       ast match {
+        case ForCStyleExpressionAST(_, index, test, incr, body, els) =>
+          index foreach { case (_, _, e) => strings(e) }
+          test foreach strings
+          incr foreach strings
+          body foreach strings
+          els foreach strings
         case DerefExpressionAST(_, _, expr)   => strings(expr)
         case PreExpressionAST(op, pos, expr)  => strings(expr)
         case PostExpressionAST(op, pos, expr) => strings(expr)
@@ -243,7 +249,7 @@ object CodeGenerator {
     }
 
     def compileFunction(name: String,
-                        ret: Option[(Position, DatatypeAST)],
+                        ret: Option[(Position, TypeAST)],
                         parms: List[PatternAST],
                         arb: Boolean,
                         parts: List[FunctionPart],
@@ -419,11 +425,26 @@ object CodeGenerator {
               body foreach (compileExpression(true, _))
               indent(s"br label %$begin")
               line(s"$end:")
-
-              if (!rvalue) // todo: flip the variable to lvalue
-                expval = null
-
               UnitType // todo: get type correctly by looking at while body
+            case ForCStyleExpressionAST(label, index, test, incr, body, els) =>
+              val begin = labelName
+
+              indent(s"br label %$begin")
+              line(s"$begin:")
+
+              val end      = labelName
+              val loopbody = labelName
+
+              if (test isDefined) {
+                indent(s"br i1 ${compileExpression(true, test.get)._1}, label %$loopbody, label %$end")
+                line(s"$loopbody:")
+              }
+
+              body foreach (compileExpression(true, _))
+              incr foreach (compileExpression(rvalue, _))
+              indent(s"br label %$begin")
+              line(s"$end:")
+              UnitType // todo: get type correctly by looking at for body
             case UnaryExpressionAST("+", pos, expr) => compileExpression(true, expr)._2
             case UnaryExpressionAST("-", pos, expr) =>
               val (operand, typ) = compileExpression(true, expr)
