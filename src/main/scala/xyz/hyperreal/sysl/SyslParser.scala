@@ -805,7 +805,10 @@ class SyslParser extends StandardTokenParsers with PackratParsers {
       "null" ^^^ LiteralExpressionAST(null) |
       pos ~ ident ^^ { case p ~ n => VariableExpressionAST(p, n) } |
       pos ~ ("sizeof" ~> "[" ~> datatype <~ "]") ^^ {
-        case p ~ t => SizeofExpressionAST(p, t)
+        case p ~ t => SizeofTypeExpressionAST(p, t)
+      } |
+      pos ~ ("sizeof" ~> "[" ~> expression <~ "]") ^^ {
+        case p ~ e => SizeofExpressionExpressionAST(p, e)
       } |
       "(" ~> expression <~ ")"
 
