@@ -1,0 +1,7 @@
+var i = 1
+
+def main: int
+  repeat
+    print( i++ )
+
+  0

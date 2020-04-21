@@ -66,6 +66,7 @@ object CodeGenerator {
 
     def strings(ast: AST): Unit =
       ast match {
+        case RepeatExpressionAST(_, body) => strings(body)
         case ForCStyleExpressionAST(_, index, test, incr, body, els) =>
           index foreach { case (_, _, e) => strings(e) }
           test foreach strings
@@ -445,6 +446,18 @@ object CodeGenerator {
               indent(s"br label %$begin")
               line(s"$end:")
               UnitType // todo: get type correctly by looking at for body
+            case RepeatExpressionAST(label, body) =>
+              val begin = labelName
+
+              indent(s"br label %$begin")
+              line(s"$begin:")
+
+              val end = labelName
+
+              compileExpression(true, body)
+              indent(s"br label %$begin")
+              line(s"$end:")
+              UnitType // todo: get type correctly by looking at loop body
             case UnaryExpressionAST("+", pos, expr) => compileExpression(true, expr)._2
             case UnaryExpressionAST("-", pos, expr) =>
               val (operand, typ) = compileExpression(true, expr)
