@@ -202,6 +202,7 @@ class SyslLexical
     "or",
     "otherwise",
     "package",
+    "print",
     "repeat",
     "return",
     "then",
@@ -325,9 +326,13 @@ class SyslParser extends StandardTokenParsers with PackratParsers {
   lazy val statements: Parser[List[StatementAST]] = rep1(statement)
 
   lazy val statement: PackratParser[StatementAST] =
-    expressionStatement |
+    printStatement |
+      expressionStatement |
       declarationStatement |
       directiveStatement
+
+  lazy val printStatement: PackratParser[PrintStatementAST] =
+    "print" ~> arguments <~ Newline ^^ PrintStatementAST
 
   lazy val topLevelStatement: PackratParser[StatementAST] =
     declarationStatement |
@@ -744,12 +749,13 @@ class SyslParser extends StandardTokenParsers with PackratParsers {
       } |
       applyExpression
 
-  lazy val arguments: PackratParser[List[(Position, ExpressionAST)]] = "(" ~> repsep(pos ~ expression ^^ {
-    case p ~ e => (p, e)
-  }, ",") <~ ")"
+  lazy val arguments: PackratParser[List[(Position, ExpressionAST)]] =
+    repsep(pos ~ expression ^^ {
+      case p ~ e => (p, e)
+    }, ",")
 
   lazy val applyExpression: PackratParser[ExpressionAST] =
-    pos ~ applyExpression ~ pos ~ arguments ^^ {
+    pos ~ applyExpression ~ pos ~ ("(" ~> arguments <~ ")") ^^ {
       case fp ~ f ~ ap ~ args =>
         ApplyExpressionAST(fp, f, ap, args, tailrecursive = false)
     } |

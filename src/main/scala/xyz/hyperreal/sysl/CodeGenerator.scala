@@ -66,6 +66,11 @@ object CodeGenerator {
 
     def strings(ast: AST): Unit =
       ast match {
+        case PrintStatementAST(args) => args foreach { case (_, e) => strings(e) }
+        case DoWhileExpressionAST(_, body, cond, els) =>
+          strings(body)
+          strings(cond)
+          els foreach strings
         case RepeatExpressionAST(_, body) => strings(body)
         case ForCStyleExpressionAST(_, index, test, incr, body, els) =>
           index foreach { case (_, _, e) => strings(e) }
@@ -289,6 +294,44 @@ object CodeGenerator {
             //localMap(name) =
             UnitType
           case t: ExpressionAST => compileExpression(true, t)._2
+          case PrintStatementAST(args) =>
+            indent(
+              s"store i32 (i8*, ...)* @printf, i32 (i8*, ...)** ${operation("alloca i32 (i8*, ...)*, align 8")}, align 8")
+            val printf = operation(s"load i32 (i8*, ...)*, i32 (i8*, ...)** $valueCounter, align 8")
+
+            @scala.annotation.tailrec
+            def printargs(args: List[(Position, ExpressionAST)]): Unit =
+              args match {
+                case Nil =>
+                case (pos, arg) :: tl =>
+                  val (a, at) = compileExpression(true, arg)
+
+                  at match {
+                    case BoolType =>
+                      operation(s"call i32 (i8*, ...) $printf (i8* bitcast ([9 x i8]* @.bool.format to i8*), i1 $a)")
+                    case BCharType =>
+                      operation(s"call i32 (i8*, ...) $printf (i8* bitcast ([3 x i8]* @.char.format to i8*), i8 $a)")
+                    case IntType =>
+                      operation(s"call i32 (i8*, ...) $printf (i8* bitcast ([3 x i8]* @.int.format to i8*), i32 $a)")
+                    case DoubleType =>
+                      operation(
+                        s"call i32 (i8*, ...) $printf (i8* bitcast ([3 x i8]* @.double.format to i8*), double $a)")
+                    case PointerType(BCharType) | PointerType(ArrayType(_, BCharType)) =>
+                      val LiteralExpressionAST(s: String) = arg
+
+                      operation(s"call i32 (i8*, ...) $printf (i8* bitcast ([3 x i8]* @.str.format to i8*), i8* $a)")
+                    case _ => problem(pos, s"don't know how to print that type (yet): $at")
+                  }
+
+                  if (tl nonEmpty)
+                    operation(s"call i32 (i8*, ...) $printf (i8* bitcast ([3 x i8]* @.comma.format to i8*))")
+
+                  printargs(tl)
+              }
+
+            printargs(args)
+            operation(s"call i32 (i8*, ...) $printf (i8* bitcast ([2 x i8]* @.nl.format to i8*))")
+            UnitType
         }
 
       def compileBinaryExpression(lpos: Position,
@@ -427,6 +470,16 @@ object CodeGenerator {
               indent(s"br label %$begin")
               line(s"$end:")
               UnitType // todo: get type correctly by looking at while body
+            case DoWhileExpressionAST(label, body, cond, els) =>
+              val begin = labelName
+              val end   = labelName
+
+              indent(s"br label %$begin")
+              line(s"$begin:")
+              compileExpression(true, body)
+              indent(s"br i1 ${compileExpression(true, cond)._1}, label %$begin, label %$end")
+              line(s"$end:")
+              UnitType // todo: get type correctly by looking at loop body
             case ForCStyleExpressionAST(label, index, test, incr, body, els) =>
               val begin = labelName
 
@@ -539,44 +592,6 @@ object CodeGenerator {
                 case Some(_) => problem(pos, "not yet implemented")
                 case None    => problem(pos, s"undefined: $name")
               }
-            case ApplyExpressionAST(fpos, VariableExpressionAST(_, "print"), apos, args, tailrecursive) =>
-              indent(
-                s"store i32 (i8*, ...)* @printf, i32 (i8*, ...)** ${operation("alloca i32 (i8*, ...)*, align 8")}, align 8")
-              val printf = operation(s"load i32 (i8*, ...)*, i32 (i8*, ...)** $valueCounter, align 8")
-
-              @scala.annotation.tailrec
-              def printargs(args: List[(Position, ExpressionAST)]): Unit =
-                args match {
-                  case Nil =>
-                  case (pos, arg) :: tl =>
-                    val (a, at) = compileExpression(true, arg)
-
-                    at match {
-                      case BoolType =>
-                        operation(s"call i32 (i8*, ...) $printf (i8* bitcast ([9 x i8]* @.bool.format to i8*), i1 $a)")
-                      case BCharType =>
-                        operation(s"call i32 (i8*, ...) $printf (i8* bitcast ([3 x i8]* @.char.format to i8*), i8 $a)")
-                      case IntType =>
-                        operation(s"call i32 (i8*, ...) $printf (i8* bitcast ([3 x i8]* @.int.format to i8*), i32 $a)")
-                      case DoubleType =>
-                        operation(
-                          s"call i32 (i8*, ...) $printf (i8* bitcast ([3 x i8]* @.double.format to i8*), double $a)")
-                      case PointerType(BCharType) | PointerType(ArrayType(_, BCharType)) =>
-                        val LiteralExpressionAST(s: String) = arg
-
-                        operation(s"call i32 (i8*, ...) $printf (i8* bitcast ([3 x i8]* @.str.format to i8*), i8* $a)")
-                      case _ => problem(pos, s"don't know how to print that type (yet): $at")
-                    }
-
-                    if (tl nonEmpty)
-                      operation(s"call i32 (i8*, ...) $printf (i8* bitcast ([3 x i8]* @.comma.format to i8*))")
-
-                    printargs(tl)
-                }
-
-              printargs(args)
-              operation(s"call i32 (i8*, ...) $printf (i8* bitcast ([2 x i8]* @.nl.format to i8*))")
-              UnitType
             case ApplyExpressionAST(fpos, f, apos, args, tailrecursive) =>
               val (func, ftyp) = compileExpression(true, f)
               val rtyp =

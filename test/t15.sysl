@@ -1,7 +1,8 @@
 var p: bchar* = "asdf"
 
 def main: int
-  for ; *p != 0; p++
-    print *p
+  do
+    print *p++
+  while *p != 0
 
   0

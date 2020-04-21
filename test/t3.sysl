@@ -1,5 +1,5 @@
 def main: int
-    print(sum(3, 4, 5))
+    print sum(3, 4, 5)
     0
 
 def sum(a: int, b: int, c: int): int = add(a, add(b, c))

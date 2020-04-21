@@ -1,7 +1,7 @@
 var v: int = 123
 
 def main: int
-    print(v)
+    print v
     v = v + 1
-    print(v)
+    print v
     0

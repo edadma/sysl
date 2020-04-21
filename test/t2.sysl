@@ -1,10 +1,10 @@
 def main: int
     if false
-        print( 123 )
+        print 123
     elif false
-        print( 2 )
+        print 2
     else
-        print( 456 )
+        print 456
 
-    print( 789 )
+    print 789
     0

@@ -1,5 +1,5 @@
 var a: int = 123
 
 def main: int
-    print(a + 2)
+    print a + 2
     0

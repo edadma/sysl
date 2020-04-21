@@ -5,11 +5,11 @@ def main: int
   p = "asdf"
 
   while (c = *p++) != 0
-    print( c )
+    print c
 
   p = "zxcv"
 
   while *p != 0
-    print( *p++ )
+    print *p++
 
   0

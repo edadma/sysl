@@ -2,5 +2,5 @@ var v = 123
 var p = &v
 
 def main: int
-    print( *p )
+    print *p
     0

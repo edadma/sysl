@@ -2,7 +2,7 @@ var v: int = 1
 
 def main: int
   while v <= 5
-    print(v)
+    print v
     v = v + 1
 
   0
