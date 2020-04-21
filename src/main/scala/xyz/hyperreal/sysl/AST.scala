@@ -132,7 +132,9 @@ case class FunctionPieceAST(
 ) extends ExpressionAST
 case class AddressExpressionAST(pos: Position, name: String)                      extends ExpressionAST
 case class DerefExpressionAST(pos: Position, epos: Position, expr: ExpressionAST) extends ExpressionAST
-case class FunctionPart(guard: Option[ExpressionAST], body: ExpressionAST)        extends AST
+case class SizeofExpressionAST(pos: Position, typ: TypeAST)                       extends ExpressionAST
+
+case class FunctionPart(guard: Option[ExpressionAST], body: ExpressionAST) extends AST
 
 abstract class PatternAST                                                        extends AST { val pos: Position }
 case class NamedPatternAST(pos: Position, var alias: String, pat: PatternAST)    extends PatternAST

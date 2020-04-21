@@ -1,0 +1,3 @@
+def main: int
+    print sizeof[int], sizeof[int*], sizeof[double], sizeof[double*], sizeof[double**]
+    0

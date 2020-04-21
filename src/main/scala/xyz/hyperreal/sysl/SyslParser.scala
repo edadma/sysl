@@ -205,6 +205,7 @@ class SyslLexical
     "print",
     "repeat",
     "return",
+    "sizeof",
     "then",
     "true",
     "type",
@@ -803,6 +804,9 @@ class SyslParser extends StandardTokenParsers with PackratParsers {
       ("true" | "false") ^^ (b => LiteralExpressionAST(b.toBoolean)) |
       "null" ^^^ LiteralExpressionAST(null) |
       pos ~ ident ^^ { case p ~ n => VariableExpressionAST(p, n) } |
+      pos ~ ("sizeof" ~> "[" ~> datatype <~ "]") ^^ {
+        case p ~ t => SizeofExpressionAST(p, t)
+      } |
       "(" ~> expression <~ ")"
 
   lazy val pattern: PackratParser[PatternAST] = altPattern

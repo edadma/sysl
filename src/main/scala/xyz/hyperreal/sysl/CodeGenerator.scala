@@ -84,7 +84,7 @@ object CodeGenerator {
         case LiteralExpressionAST(s: String) if !stringMap.contains(s) =>
           line(s"""@.str.${stringMap.size} = private unnamed_addr constant [${s.length + 1} x i8] c"$s\00", align 1""")
           stringMap(s) = stringMap.size
-        case _: LiteralExpressionAST | _: VariableExpressionAST | _: AddressExpressionAST =>
+        case _: LiteralExpressionAST | _: VariableExpressionAST | _: AddressExpressionAST | _: SizeofExpressionAST =>
         case AssignmentExpressionAST(lhs, _, rhs) =>
           lhs foreach { case (_, e) => strings(e) }
           rhs foreach { case (_, e) => strings(e) }
@@ -411,6 +411,11 @@ object CodeGenerator {
       def compileExpression(rvalue: Boolean, expr: ExpressionAST): (String, Type) = {
         val typ =
           expr match {
+            case SizeofExpressionAST(pos, t) =>
+              val dt = datatype(pos, t)
+
+              operation(s"ptrtoint $dt* ${operation(s"getelementptr $dt, $dt* null, i32 1")} to i32")
+              IntType
             case ConditionalExpressionAST(cond, els) =>
               val donelabel = labelName
 
