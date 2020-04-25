@@ -335,6 +335,15 @@ object CodeGenerator {
             UnitType
         }
 
+      def typeStatement(stmt: StatementAST) =
+        stmt match {
+          case VarAST(pos, name, typ, init) =>
+            UnitType
+          case t: ExpressionAST => typeExpression(true, t)
+          case PrintStatementAST(args) =>
+            UnitType
+        }
+
       def compileBinaryExpression(lpos: Position,
                                   left: ExpressionAST,
                                   op: String,
@@ -343,7 +352,81 @@ object CodeGenerator {
         binaryExpression(lpos, compileExpression(true, left), op, rpos, compileExpression(true, right))
       }
 
+      def typeBinaryExpression(lpos: Position,
+                               left: ExpressionAST,
+                               op: String,
+                               rpos: Position,
+                               right: ExpressionAST) = {
+        typebinaryExpression(lpos, typeExpression(true, left), op, rpos, typeExpression(true, right))
+      }
+
       def binaryExpression(lpos: Position, left: (String, Type), op: String, rpos: Position, right: (String, Type)) = {
+        (left, op, right) match {
+          case ((l, lt @ PointerType(ltp)), "+", (r, rt: IntegerType)) =>
+            operation(s"getelementptr $ltp, $lt $l, $rt $r")
+            lt
+          case ((l, lt @ PointerType(ltp)), "-", (r, rt: IntegerType)) =>
+            operation(s"getelementptr $ltp, $lt $l, $rt -$r")
+            lt
+          case ((l, lt: IntegerType), "+", (r, rt @ PointerType(rtp))) =>
+            operation(s"getelementptr $rtp, $rt $r, $lt $l")
+            rt
+          case ((l, lt: IntegerType), "-", (r, rt @ PointerType(rtp))) =>
+            operation(s"getelementptr $rtp, $rt $r, $lt -$l")
+            rt
+          case ((_, _: PointerType), _, (_, _: IntegerType)) | ((_, _: IntegerType), _, (_, _: PointerType)) =>
+            problem(lpos, "invalid operation for pointer arithmetic") // todo: op position should be used
+          case ((_, _: PointerType), _, (_, _: NumericType)) | ((_, _: NumericType), _, (_, _: PointerType)) =>
+            problem(lpos, "non-integer type used in pointer arithmetic") // todo: op position should be used
+          case _ =>
+            val (l, tl) = left
+            val (r, tr) = right
+            val (rt, ol, or) =
+              (tl, tr) match {
+                case _ if tl == tr                             => (tl, l, r)
+                case (DoubleType, LongType)                    => (DoubleType, l, operation(s"sitofp i64 $r to double"))
+                case (LongType, DoubleType)                    => (DoubleType, operation(s"sitofp i64 $l to double"), r)
+                case (LongType, IntType)                       => (LongType, l, operation(s"sext i32 $r to i64"))
+                case (IntType, LongType)                       => (LongType, operation(s"sext i32 $l to i64"), r)
+                case (DoubleType, IntType)                     => (DoubleType, l, operation(s"sitofp i32 $r to double"))
+                case (IntType, DoubleType)                     => (DoubleType, operation(s"sitofp i32 $l to double"), r)
+                case (IntType, CharType) | (CharType, IntType) => (IntType, l, r)
+                case (IntType, BCharType)                      => (IntType, l, operation(s"zext i8 $r to i32"))
+                case (BCharType, IntType)                      => (IntType, operation(s"zext i8 $l to i32"), r)
+              }
+
+            val inst =
+              (rt, op) match {
+                case (_: IntegerType, "+")   => "add"
+                case (_: FloatType, "+")     => "fadd"
+                case (_: IntegerType, "-")   => "sub"
+                case (_: FloatType, "-")     => "fsub"
+                case (_: IntegerType, "*")   => "mul"
+                case (_: FloatType, "*")     => "fmul"
+                case (_: IntegerType, "/")   => "sdiv"
+                case (_: FloatType, "/")     => "fdiv"
+                case (_: IntegerType, "mod") => "srem"
+                case (_: FloatType, "mod")   => "frem"
+                case (_: IntegerType, "==")  => "icmp eq" // todo: unsigned comparisons?
+                case (_: FloatType, "==")    => "fcmp ueq"
+                case (_: IntegerType, "!=")  => "icmp ne"
+                case (_: FloatType, "!=")    => "fcmp une"
+                case (_: IntegerType, "<")   => "icmp slt"
+                case (_: FloatType, "<")     => "fcmp ult"
+                case (_: IntegerType, "<=")  => "icmp sle"
+                case (_: FloatType, "<=")    => "fcmp ule"
+                case (_: IntegerType, ">")   => "icmp sgt"
+                case (_: FloatType, ">")     => "fcmp ugt"
+                case (_: IntegerType, ">=")  => "icmp sge"
+                case (_: FloatType, ">=")    => "fcmp uge"
+              }
+
+            operation(s"$inst $rt $ol, $or")
+            rt
+        }
+      }
+
+      def typebinaryExpression(lpos: Position, left: Type, op: String, rpos: Position, right: Type) = {
         (left, op, right) match {
           case ((l, lt @ PointerType(ltp)), "+", (r, rt: IntegerType)) =>
             operation(s"getelementptr $ltp, $lt $l, $rt $r")
@@ -557,6 +640,171 @@ object CodeGenerator {
 
               indent(s"store $typ $valueCounter, $ltyp $lvalue")
               typ
+            case PostExpressionAST(op, pos, expr) =>
+              val (lvalue, ltyp) = compileExpression(false, expr)
+              val (rvalue, rtyp) = compileExpression(true, expr)
+              val typ            = binaryExpression(pos, (rvalue, rtyp), op.head.toString, null, ("1", IntType))
+
+              indent(s"store $typ $valueCounter, $ltyp $lvalue")
+              expval = rvalue
+              rtyp
+            case VariableExpressionAST(pos, name) =>
+              globalDefs get name match {
+                case Some(VarDef(typ, _, _)) =>
+                  if (rvalue) {
+                    operation(s"load $typ, $typ* @$name")
+                    typ
+                  } else {
+                    expval = s"@$name"
+                    PointerType(typ)
+                  }
+                case Some(FunctionDef(typ)) =>
+                  indent(s"store $typ* @$name, $typ** ${operation(s"alloca $typ*, align 8")}, align 8")
+                  operation(s"load $typ*, $typ** $valueCounter, align 8")
+                  typ
+                case Some(_) => problem(pos, "unimplemented")
+                case None =>
+                  parmMap get name match {
+                    case Some(typ) =>
+                      indent(s"store $typ %$name, $typ* ${operation(s"alloca $typ")}")
+                      operation(s"load $typ, $typ* $valueCounter")
+                      typ
+                    case None =>
+                      problem(pos, s"unknown identifier: $name")
+                  }
+              }
+            case AddressExpressionAST(pos, name) =>
+              globalDefs get name match {
+                case Some(VarDef(typ, _, _)) =>
+                  expval = s"@$name"
+                  PointerType(typ)
+                case Some(_) => problem(pos, "not yet implemented")
+                case None    => problem(pos, s"undefined: $name")
+              }
+            case ApplyExpressionAST(fpos, f, apos, args, tailrecursive) =>
+              val (func, ftyp) = compileExpression(true, f)
+              val rtyp =
+                ftyp match {
+                  case FunctionType(ret, parms, arb) => ret
+                  case a                             => problem(fpos, s"expected function type: $a")
+                }
+              val argvals =
+                for ((p, a) <- args)
+                  yield {
+                    val (e, t) = compileExpression(true, a)
+
+                    s"$t $e"
+                  }
+
+              operation(
+                s"call $rtyp (${Iterator.fill(args.length)("i32") mkString ", "}) $func (${argvals mkString ", "})")
+              rtyp
+            case ComparisonExpressionAST(lpos, left, List((comp, rpos, right))) =>
+              compileBinaryExpression(lpos, left, comp, rpos, right)
+              BoolType
+            case AssignmentExpressionAST(lhs, op, rhs) =>
+              val (lpos, l) = lhs.head
+              val (rpos, r) = rhs.head
+
+              val (lvalue, ltyp) = compileExpression(false, l)
+              val (rvalue, rtyp) = compileExpression(true, r)
+
+              ltyp match {
+                case PointerType(typ) =>
+                  if (typ != rtyp)
+                    problem(rpos, s"incompatible types")
+                case _ => problem(lpos, "not an l-value")
+              }
+
+              indent(s"store $rtyp $rvalue, $ltyp $lvalue")
+              rtyp
+          }
+
+        (if (typ == UnitType) UnitType.void else expval, typ)
+      }
+
+      def typeExpression(rvalue: Boolean, expr: ExpressionAST): Type = {
+        val typ =
+          expr match {
+            case SizeofTypeExpressionAST(pos, t) =>
+              IntType
+            case ConditionalExpressionAST(cond, els) =>
+              val donelabel = labelName
+
+              @tailrec
+              def gencond(cs: Seq[(Position, ExpressionAST, ExpressionAST)],
+                          truelist: List[(String, (String, Type))]): (List[(String, (String, Type))], String) = {
+                val (pos, condexpr, trueexpr) = cs.head
+
+                val truelabel  = labelName
+                val falselabel = labelName
+
+                position(pos)
+
+                val (condvalue, condtype) = compileExpression(true, condexpr)
+
+                if (condtype != BoolType)
+                  problem(pos, s"expected expression of type Bool, found ${condtype.name}")
+
+                indent(s"br i1 $condvalue, label %$truelabel, label %$falselabel")
+                line(s"$truelabel:")
+
+                val trueval = compileExpression(rvalue, trueexpr)
+
+                indent(s"br label %$donelabel")
+                line(s"$falselabel:")
+
+                if (cs.tail nonEmpty)
+                  gencond(cs.tail, truelist :+ (truelabel, trueval))
+                else
+                  (truelist :+ (truelabel, trueval), falselabel)
+              }
+
+              val (truelist, falselabel) = gencond(cond, Nil)
+              val (falseval, falsetyp) =
+                els match {
+                  case None    => (0, UnitType)
+                  case Some(e) => compileExpression(rvalue, e)
+                }
+
+              indent(s"br label %$donelabel")
+              line(s"$donelabel:")
+              operation(
+                s"phi $falsetyp ${truelist map { case (truelabel, (trueval, _)) => s"[ $trueval, %$truelabel ]" } mkString ", "}, [ $falseval, %$falselabel ]")
+              falsetyp // todo: get type correctly by looking all types
+            case WhileExpressionAST(lab, cond, body, els) =>
+              UnitType // todo: get type correctly by looking at while body
+            case DoWhileExpressionAST(label, body, cond, els) =>
+              UnitType // todo: get type correctly by looking at loop body
+            case ForCStyleExpressionAST(label, index, test, incr, body, els) =>
+              UnitType // todo: get type correctly by looking at for body
+            case RepeatExpressionAST(label, body) =>
+              UnitType // todo: get type correctly by looking at loop body
+            case UnaryExpressionAST("+", pos, expr) => typeExpression(true, expr)
+            case UnaryExpressionAST("-", pos, expr) =>
+              typeExpression(true, expr)
+            case DerefExpressionAST(pos, epos, expr) =>
+              typeExpression(true, expr) match {
+                case PointerType(pointee) if pointee.firstclass =>
+                  if (rvalue)
+                    pointee
+                  else
+                    typ
+                case _: PointerType => problem(epos, "only pointers to LLVM 'first class' types can be dereferenced")
+                case _              => problem(epos, "expression does not return a pointer")
+              }
+            case BinaryExpressionAST(lpos, left, op, rpos, right) =>
+              typeBinaryExpression(lpos, left, op, rpos, right)
+            case BlockExpressionAST(stmts) =>
+              stmts.init foreach typeStatement
+              typeStatement(stmts.last)
+            case LiteralExpressionAST(s: String) =>
+              PointerType(BCharType)
+            case LiteralExpressionAST(v: Any) =>
+              typeLiteral(v)
+            case PreExpressionAST(op @ ("++" | "--"), pos, expr) =>
+              val (lvalue, ltyp) = compileExpression(false, expr)
+              val typ            = compileBinaryExpression(pos, expr, op.head.toString, null, LiteralExpressionAST(1))
             case PostExpressionAST(op, pos, expr) =>
               val (lvalue, ltyp) = compileExpression(false, expr)
               val (rvalue, rtyp) = compileExpression(true, expr)
