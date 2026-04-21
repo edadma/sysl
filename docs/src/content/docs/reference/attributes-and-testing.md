@@ -5,7 +5,7 @@ description: Attribute syntax, `#test`, `#deprecated`, and the `sysl test` runne
 
 Attributes are annotations prefixed with `#` that attach to the following declaration. They appear on their own line(s) immediately before the declaration:
 
-```
+```sysl
 #test
 test_copy_basic() -> unit
     0
@@ -35,7 +35,7 @@ Functions marked `#test` are unit tests. Requirements:
 
 A test **passes** iff it does not panic. A panic (`panic("msg")`, `abort()`, or any runtime trap) fails the test.
 
-```
+```sysl
 #test
 test_trivial() -> unit
     assert(1 + 1 == 2, "math is broken")
@@ -47,7 +47,7 @@ test_with_display_name() -> unit
 
 ### `should_panic` — tests that must panic
 
-```
+```sysl
 #test(should_panic)
 test_guard() -> unit
     panic("this must fire")
@@ -62,7 +62,7 @@ test_bounds() -> unit
 
 ## `sysl test` — running tests
 
-```
+```bash
 sysl test <path>                      # file or directory (recursive)
 sysl test --filter <pattern> <path>   # substring match on test / display name
 sysl test --backend interpreter|trisc|all <path>
@@ -72,7 +72,7 @@ sysl test --verbose <path>
 
 Output groups tests by source file with pass / fail markers and timings:
 
-```
+```text
 running 6 tests
 std/mem/mem.lsysl
   ✓ test_copy_basic              (0.2ms)
@@ -97,7 +97,7 @@ Exit code is 0 iff all tests pass. Failing tests print the source file and line 
 
 Marks a function as deprecated. Calls emit a warning to stderr during analysis (once per callee per compilation):
 
-```
+```sysl
 #deprecated("use foo2 instead")
 foo() -> int = 1
 
@@ -107,7 +107,7 @@ old_api() -> int = 2
 
 Warnings:
 
-```
+```text
 warning: 'foo' is deprecated: use foo2 instead
 warning: 'old_api' is deprecated
 ```

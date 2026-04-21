@@ -1,0 +1,318 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "sysl",
+  "scopeName": "source.sysl",
+  "fileTypes": ["sysl", "lsysl"],
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#preprocessor" },
+    { "include": "#attributes" },
+    { "include": "#strings" },
+    { "include": "#char-literal" },
+    { "include": "#numbers" },
+    { "include": "#keywords" },
+    { "include": "#constants" },
+    { "include": "#builtins" },
+    { "include": "#types" },
+    { "include": "#function-like" },
+    { "include": "#operators" },
+    { "include": "#punctuation" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.double-slash.sysl",
+          "match": "//.*$"
+        }
+      ]
+    },
+    "preprocessor": {
+      "patterns": [
+        {
+          "name": "keyword.control.preprocessor.sysl",
+          "match": "^\\s*#(if|elif|else|endif)\\b"
+        }
+      ]
+    },
+    "attributes": {
+      "patterns": [
+        {
+          "match": "(#)([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": { "name": "punctuation.definition.attribute.sysl" },
+            "2": { "name": "entity.name.tag.sysl" }
+          }
+        }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        { "include": "#interp-string" },
+        { "include": "#format-string" },
+        { "include": "#plain-string" }
+      ]
+    },
+    "interp-string": {
+      "name": "string.quoted.double.interp.sysl",
+      "begin": "(s)(\")",
+      "beginCaptures": {
+        "1": { "name": "storage.type.string.prefix.sysl" },
+        "2": { "name": "punctuation.definition.string.begin.sysl" }
+      },
+      "end": "\"",
+      "endCaptures": {
+        "0": { "name": "punctuation.definition.string.end.sysl" }
+      },
+      "patterns": [
+        { "include": "#string-escape" },
+        { "include": "#interpolation-expr" },
+        { "include": "#interpolation-var" },
+        { "include": "#dollar-escape" }
+      ]
+    },
+    "format-string": {
+      "name": "string.quoted.double.format.sysl",
+      "begin": "(f)(\")",
+      "beginCaptures": {
+        "1": { "name": "storage.type.string.prefix.sysl" },
+        "2": { "name": "punctuation.definition.string.begin.sysl" }
+      },
+      "end": "\"",
+      "endCaptures": {
+        "0": { "name": "punctuation.definition.string.end.sysl" }
+      },
+      "patterns": [
+        { "include": "#string-escape" },
+        { "include": "#format-spec" },
+        { "include": "#interpolation-expr" },
+        { "include": "#interpolation-var" },
+        { "include": "#dollar-escape" }
+      ]
+    },
+    "plain-string": {
+      "name": "string.quoted.double.sysl",
+      "begin": "\"",
+      "beginCaptures": {
+        "0": { "name": "punctuation.definition.string.begin.sysl" }
+      },
+      "end": "\"",
+      "endCaptures": {
+        "0": { "name": "punctuation.definition.string.end.sysl" }
+      },
+      "patterns": [
+        { "include": "#string-escape" }
+      ]
+    },
+    "char-literal": {
+      "patterns": [
+        {
+          "name": "string.quoted.single.sysl",
+          "match": "'(\\\\(x[0-9A-Fa-f]{2}|[nrt0\\\\'\"])|[^'\\\\])'"
+        }
+      ]
+    },
+    "string-escape": {
+      "patterns": [
+        {
+          "name": "constant.character.escape.sysl",
+          "match": "\\\\(x[0-9A-Fa-f]{2}|[nrt0\\\\'\"])"
+        }
+      ]
+    },
+    "dollar-escape": {
+      "patterns": [
+        {
+          "name": "constant.character.escape.dollar.sysl",
+          "match": "\\$\\$"
+        }
+      ]
+    },
+    "interpolation-var": {
+      "patterns": [
+        {
+          "match": "(\\$)([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": { "name": "punctuation.definition.template-expression.begin.sysl" },
+            "2": { "name": "variable.other.interpolation.sysl" }
+          }
+        }
+      ]
+    },
+    "interpolation-expr": {
+      "begin": "\\$\\{",
+      "beginCaptures": {
+        "0": { "name": "punctuation.definition.template-expression.begin.sysl" }
+      },
+      "end": "\\}",
+      "endCaptures": {
+        "0": { "name": "punctuation.definition.template-expression.end.sysl" }
+      },
+      "patterns": [
+        { "include": "#numbers" },
+        { "include": "#keywords" },
+        { "include": "#constants" },
+        { "include": "#builtins" },
+        { "include": "#types" },
+        { "include": "#function-like" },
+        { "include": "#strings" },
+        { "include": "#operators" },
+        { "include": "#punctuation" }
+      ]
+    },
+    "format-spec": {
+      "patterns": [
+        {
+          "name": "constant.other.format-spec.sysl",
+          "match": "%[-+]?[0-9]*[dxXbosp%]"
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.hex.sysl",
+          "match": "\\b0x[0-9A-Fa-f][0-9A-Fa-f_]*(i8|i16|i32|i64|u8|u16|u32|u64)?\\b"
+        },
+        {
+          "name": "constant.numeric.binary.sysl",
+          "match": "\\b0b[01][01_]*(i8|i16|i32|i64|u8|u16|u32|u64)?\\b"
+        },
+        {
+          "name": "constant.numeric.float.sysl",
+          "match": "\\b[0-9][0-9_]*\\.[0-9][0-9_]*([eE][-+]?[0-9][0-9_]*)?(f32|f64)?\\b"
+        },
+        {
+          "name": "constant.numeric.float.sysl",
+          "match": "\\b[0-9][0-9_]*[eE][-+]?[0-9][0-9_]*(f32|f64)?\\b"
+        },
+        {
+          "name": "constant.numeric.decimal.sysl",
+          "match": "\\b[0-9][0-9_]*(i8|i16|i32|i64|u8|u16|u32|u64)?\\b"
+        }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.sysl",
+          "match": "\\b(if|elif|else|then|match|for|while|do|return|break|continue|defer|in|downTo|step|is|where|within|not)\\b"
+        },
+        {
+          "name": "keyword.declaration.sysl",
+          "match": "\\b(module|import|private|extern|val|var|const|def|struct|enum|type|trait|impl|new)\\b"
+        },
+        {
+          "name": "keyword.other.contract.sysl",
+          "match": "\\b(require|ensure|old|result)\\b"
+        },
+        {
+          "name": "storage.modifier.sysl",
+          "match": "\\b(volatile|escaping)\\b"
+        },
+        {
+          "name": "keyword.other.sysl",
+          "match": "\\b(asm)\\b"
+        },
+        {
+          "name": "variable.language.self.sysl",
+          "match": "\\bself\\b"
+        }
+      ]
+    },
+    "constants": {
+      "patterns": [
+        {
+          "name": "constant.language.boolean.sysl",
+          "match": "\\b(true|false)\\b"
+        },
+        {
+          "name": "constant.language.null.sysl",
+          "match": "\\b(null|unit)\\b"
+        }
+      ]
+    },
+    "builtins": {
+      "patterns": [
+        {
+          "name": "support.function.builtin.sysl",
+          "match": "\\b(putchar|print|println|puts|puti|len|cap|append|str|malloc|free|calloc|realloc|sbrk|panic|assert|expect|abort|sizeof|wrapping_add|wrapping_sub|wrapping_mul|saturating_add|saturating_sub|saturating_mul)\\b(?=\\s*\\()"
+        }
+      ]
+    },
+    "types": {
+      "patterns": [
+        {
+          "name": "support.type.primitive.sysl",
+          "match": "\\b(i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool|string|int|long|byte|char|uint|ulong|float|double)\\b"
+        },
+        {
+          "name": "support.class.sysl",
+          "match": "\\b[A-Z][A-Za-z0-9_]*\\b"
+        }
+      ]
+    },
+    "function-like": {
+      "patterns": [
+        {
+          "match": "\\b([a-z_][A-Za-z0-9_]*)\\s*(?=\\()",
+          "captures": {
+            "1": { "name": "entity.name.function.sysl" }
+          }
+        }
+      ]
+    },
+    "operators": {
+      "patterns": [
+        {
+          "name": "keyword.operator.arrow.sysl",
+          "match": "->|=>"
+        },
+        {
+          "name": "keyword.operator.range.sysl",
+          "match": "\\.\\.<|\\.\\."
+        },
+        {
+          "name": "keyword.operator.try.sysl",
+          "match": "\\?"
+        },
+        {
+          "name": "keyword.operator.comparison.sysl",
+          "match": "==|!=|<=|>=|<|>"
+        },
+        {
+          "name": "keyword.operator.logical.sysl",
+          "match": "&&|\\|\\||!(?!=)"
+        },
+        {
+          "name": "keyword.operator.assignment.sysl",
+          "match": "\\+=|-=|\\*=|/=|%=|&=|\\|=|\\^=|<<=|>>=|="
+        },
+        {
+          "name": "keyword.operator.bitwise.sysl",
+          "match": "<<|>>|\\^|~"
+        },
+        {
+          "name": "keyword.operator.arithmetic.sysl",
+          "match": "\\+\\+|--|\\+|-|\\*|/|%"
+        },
+        {
+          "name": "keyword.operator.other.sysl",
+          "match": "&|\\|"
+        }
+      ]
+    },
+    "punctuation": {
+      "patterns": [
+        {
+          "name": "punctuation.separator.sysl",
+          "match": "[,;:]"
+        },
+        {
+          "name": "punctuation.section.brackets.sysl",
+          "match": "[\\[\\]()]"
+        }
+      ]
+    }
+  }
+}

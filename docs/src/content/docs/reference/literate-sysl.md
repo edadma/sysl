@@ -11,7 +11,7 @@ description: Literate programming format mixing Markdown prose with indented Sys
 - **Code** is indented (4+ spaces or 1+ tabs) — extracted as Sysl source.
 - Fenced code blocks (triple backticks) in the prose are **not** extracted as code — they're documentation-only examples.
 
-```
+```lsysl
 This is prose explaining the module.
 
     module std.mem
@@ -44,7 +44,7 @@ The `.lsysl` renderer supports:
 
 ## Commands
 
-```
+```bash
 sysl doc <file.lsysl>                   # render one file to HTML
 sysl doc <directory>                    # render all .lsysl in directory + index
 sysl doc --output <dir> <file.lsysl>    # specify output directory

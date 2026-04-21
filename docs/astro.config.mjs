@@ -1,12 +1,23 @@
 // @ts-check
 import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
+import syslGrammar from './src/grammars/sysl.tmLanguage.json';
 
 // https://astro.build/config
 export default defineConfig({
 	integrations: [
 		starlight({
 			title: 'SysL Documentation',
+			expressiveCode: {
+				shiki: {
+					langs: [
+						{
+							...syslGrammar,
+							aliases: ['lsysl'],
+						},
+					],
+				},
+			},
 			sidebar: [
 				{
 					label: 'Getting Started',
