@@ -128,7 +128,7 @@ p match
     Point(_, y) -> y
     Point(x, y) if x == 0 -> y
 
-// tagged union (data enum) matching
+// tagged union (data enum) matching — must be exhaustive
 s match
     Circle(r) -> r * r * 3
     Rect(w, h) -> w * h
@@ -142,6 +142,8 @@ x match
         doSomething(a)
     else -> fallback()
 ```
+
+A `match` on a data-enum value must cover every variant, or include a wildcard `_ -> ...` or `else -> ...` default. Missing variants produce a compile error listing them. Guarded arms do not count toward exhaustiveness. Non-enum matches (on integers, strings, etc.) do not require exhaustiveness.
 
 ## Loops
 
