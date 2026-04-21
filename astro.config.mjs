@@ -6,19 +6,22 @@ import starlight from '@astrojs/starlight';
 export default defineConfig({
 	integrations: [
 		starlight({
-			title: 'My Docs',
-			social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/withastro/starlight' }],
+			title: 'SysL Documentation',
 			sidebar: [
 				{
-					label: 'Guides',
+					label: 'Getting Started',
 					items: [
-						// Each item here is one entry in the navigation menu.
-						{ label: 'Example Guide', slug: 'guides/example' },
+						{ label: 'Overview', slug: 'guides/overview' },
+						{ label: 'Repository Map', slug: 'guides/repository-map' },
 					],
 				},
 				{
-					label: 'Reference',
+					label: 'Language Reference',
 					autogenerate: { directory: 'reference' },
+				},
+				{
+					label: 'Implementation',
+					autogenerate: { directory: 'implementation' },
 				},
 			],
 		}),
