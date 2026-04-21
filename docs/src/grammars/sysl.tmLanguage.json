@@ -204,7 +204,7 @@
         },
         {
           "name": "keyword.other.contract.sysl",
-          "match": "\\b(require|ensure|old|result)\\b"
+          "match": "\\b(require|ensure|invariant|static_assert|old|result)\\b"
         },
         {
           "name": "storage.modifier.sysl",
@@ -244,7 +244,7 @@
       "patterns": [
         {
           "name": "support.type.primitive.sysl",
-          "match": "\\b(i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool|string|int|long|byte|char|uint|ulong|float|double)\\b"
+          "match": "\\b(i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool|string|int|short|long|byte|char|uint|ushort|ulong|float|double)\\b"
         },
         {
           "name": "support.class.sysl",

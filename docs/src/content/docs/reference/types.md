@@ -10,11 +10,11 @@ Sysl has value types, reference-counted refs (`&T`), and raw pointers (`*T`) as 
 | Type | Alias | Size | Description |
 |------|-------|------|-------------|
 | `i8` | | 1 byte | signed 8-bit integer |
-| `i16` | | 2 bytes | signed 16-bit integer |
+| `i16` | `short` | 2 bytes | signed 16-bit integer |
 | `i32` | `int` | 4 bytes | signed 32-bit integer |
 | `i64` | `long` | 8 bytes | signed 64-bit integer |
 | `u8` | `byte` | 1 byte | unsigned 8-bit integer |
-| `u16` | | 2 bytes | unsigned 16-bit integer |
+| `u16` | `ushort` | 2 bytes | unsigned 16-bit integer |
 | `u32` | `char`, `uint` | 4 bytes | unsigned 32-bit integer (Unicode codepoint) |
 | `u64` | `ulong` | 8 bytes | unsigned 64-bit integer |
 | `f32` | `float` | 4 bytes | IEEE-754 single-precision |

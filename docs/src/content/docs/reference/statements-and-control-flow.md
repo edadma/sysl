@@ -246,6 +246,52 @@ return a, b             // return tuple (no parens needed)
 
 The last expression in a block is an implicit return.
 
+## `invariant` — assertion with loop-body focus
+
+`invariant <bool>` is an assertion that traps if the condition is false. It is primarily intended at the top of loop bodies (and re-checks on each iteration), but also works as a general in-function assertion. It reuses the same trap path as `require` / `ensure`.
+
+```sysl
+main() -> int
+    var sum = 0
+    var i = 0
+    while i < 5
+        invariant i >= 0
+        invariant sum >= 0
+        sum = sum + i
+        i++
+    sum
+```
+
+As a general assertion:
+
+```sysl
+main() -> int
+    var x = 42
+    invariant x > 0
+    x
+```
+
+## `static_assert` — compile-time assertion
+
+`static_assert(cond [, "msg"])` at module scope fails the compile if `cond` is false. The condition must be compile-time evaluable — `const` references, `sizeof`, arithmetic, and comparison operators are supported.
+
+```sysl
+static_assert(sizeof(int) == 4)
+static_assert(sizeof(i64) == 8, "i64 must be 8 bytes")
+
+struct Header
+    magic: u32
+    version: u32
+    flags: u64
+
+static_assert(sizeof(Header) == 16, "Header layout fixed by protocol")
+
+const PAGE_SIZE = 4096
+static_assert(PAGE_SIZE % 4096 == 0)
+```
+
+A non-foldable condition (e.g. a function call) is itself a compile error: `not compile-time evaluable`. On failure, the optional message is reported; without a message, the error reads `static_assert failed`.
+
 ## Inline assembly
 
 ```sysl

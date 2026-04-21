@@ -46,10 +46,23 @@ sqrt(x: f64) -> f64
     r
 ```
 
-- **`require <bool>`** — evaluated once on function entry. Traps if false.
-- **`ensure <bool>`** — evaluated before every return (including implicit fall-through). Traps if false.
+- **`require <bool> [, "message"]`** — evaluated once on function entry. Traps if false.
+- **`ensure <bool> [, "message"]`** — evaluated before every return (including implicit fall-through). Traps if false.
 - Multiple clauses are allowed, in any order, but must all appear before the first regular statement.
 - Checks go through the standard trap path (same as range checks).
+
+### Optional failure message
+
+A comma-separated string literal after the condition is included in the runtime error, matching Scala's `require(cond, msg)`:
+
+```sysl
+pos(x: int) -> int
+    require x >= 0, "x must be non-negative"
+    ensure result > 0, "pos() result must be positive"
+    x + 1
+```
+
+On failure the error reads `precondition check failed: x must be non-negative` (or `postcondition check failed: ...` for `ensure`). The bare `require <cond>` / `ensure <cond>` form still works and falls back to the generic kind word. Surfaced in the LLVM and interpreter backends; TRISC and SVM currently trap with a fixed error code.
 
 **`result` in `ensure` clauses.** Inside an `ensure` expression, `result` refers to the function's return value. Outside `ensure` it is a normal identifier.
 
