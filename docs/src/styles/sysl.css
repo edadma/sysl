@@ -1,0 +1,58 @@
+/* Sysl — custom Starlight theme.
+   Teal / slate accent for a systems-language feel, with warm orange highlights
+   for call-to-action elements. */
+
+:root {
+	/* Dark mode accents (Starlight default palette, tinted toward teal). */
+	--sl-color-accent-low: #0b2a2b;
+	--sl-color-accent: #1f8b8d;
+	--sl-color-accent-high: #a7e5e6;
+
+	--sl-color-white: #f5f7f7;
+	--sl-color-gray-1: #e4ecec;
+	--sl-color-gray-2: #b3c0c0;
+	--sl-color-gray-3: #7d8a8b;
+	--sl-color-gray-4: #4a5757;
+	--sl-color-gray-5: #2a3434;
+	--sl-color-gray-6: #1b2424;
+	--sl-color-black: #0f1616;
+}
+
+:root[data-theme='light'] {
+	--sl-color-accent-low: #cfecee;
+	--sl-color-accent: #0f6d6f;
+	--sl-color-accent-high: #063739;
+
+	--sl-color-white: #0f1616;
+	--sl-color-gray-1: #1b2424;
+	--sl-color-gray-2: #2a3434;
+	--sl-color-gray-3: #4a5757;
+	--sl-color-gray-4: #7d8a8b;
+	--sl-color-gray-5: #d7dede;
+	--sl-color-gray-6: #eef3f3;
+	--sl-color-gray-7: #f8fafa;
+	--sl-color-black: #ffffff;
+}
+
+/* Splash hero polish: give the tagline a bit more breathing room and emphasis. */
+.hero .tagline {
+	font-size: clamp(1.1rem, 2.4vw, 1.4rem);
+	line-height: 1.55;
+	max-width: 48rem;
+	white-space: pre-line;
+}
+
+.hero h1 {
+	font-size: clamp(2.5rem, 6vw, 4rem);
+	letter-spacing: -0.02em;
+}
+
+/* Make code blocks feel a little more "systems". */
+.expressive-code {
+	--ec-brdRad: 0.5rem;
+}
+
+/* Slightly tighter CardGrid on the landing page. */
+.sl-container > starlight-card-grid {
+	gap: 1rem;
+}

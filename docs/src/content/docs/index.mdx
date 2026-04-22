@@ -1,33 +1,327 @@
 ---
-title: SysL Documentation
-description: Reference and implementation notes for the SysL language.
+title: Sysl
+description: A systems programming language with value types, ref-counted refs, and raw pointers — built for kernels, compilers, and everything that has to know where its bytes live.
 template: splash
 hero:
-  tagline: The documentation home for the SysL language.
+  tagline: |
+    A systems language for people who want to know where their bytes live.
+    Value types, ref-counted refs, and raw pointers — three ways to own memory, one language from boot ROM to userspace.
   actions:
-    - text: Start Here
-      link: /guides/overview/
+    - text: Get started
+      link: /guides/introduction/
       icon: right-arrow
-    - text: Language Reference
-      link: /reference/
+      variant: primary
+    - text: Language reference
+      link: /reference/types/
       icon: open-book
+    - text: View on GitHub
+      link: https://github.com/edadma/trisc
+      icon: external
+      variant: minimal
 ---
 
-import { Card, CardGrid } from '@astrojs/starlight/components';
+import { Card, CardGrid, LinkCard, Tabs, TabItem, Aside, Steps, Badge } from '@astrojs/starlight/components';
 
-## Documentation layout
+## Sysl in thirty seconds
 
-<CardGrid stagger>
-	<Card title="Language reference (`trisc/`)" icon="open-book">
-		Canonical syntax and semantics should follow the sources in `trisc/`.
-	</Card>
-	<Card title="Compiler/interpreter (`trisc/sysl/`)" icon="seti:terminal">
-		Implementation notes and architecture should track `trisc/sysl/`.
-	</Card>
-	<Card title="Getting started guides" icon="pencil">
-		Use guides for onboarding and workflow, then deep-link into the reference.
-	</Card>
-	<Card title="Implementation internals" icon="gear">
-		Document parser, compiler, interpreter, and runtime behavior by subsystem.
-	</Card>
+```sysl
+// A tagged union, pattern matching, and refcounted recursion —
+// just enough to evaluate an arithmetic expression.
+enum Expr
+    Lit(value: int)
+    Add(left: &Expr, right: &Expr)
+    Mul(left: &Expr, right: &Expr)
+
+eval(e: &Expr) -> int
+    *e match
+        Lit(v)    -> v
+        Add(l, r) -> eval(l) + eval(r)
+        Mul(l, r) -> eval(l) * eval(r)
+
+main() -> int
+    // (1 + 2) * 3 = 9.  Refs are freed automatically when scope ends.
+    val tree = new Mul(new Add(new Lit(1), new Lit(2)), new Lit(3))
+
+    eval(tree)
+```
+
+No allocator needed for the stack frames. No garbage collector. The `&Expr` refs carry a
+ref-count header and free themselves when they fall out of scope. Swap `&` for `*` when you
+need a raw pointer; swap `new` for a stack `var` when you don't need the heap at all.
+
+---
+
+## What Sysl is for
+
+<CardGrid>
+  <Card title="Kernels and drivers" icon="setting">
+    `volatile` for MMIO, non-escaping closures that live on the stack, inline assembly, and a
+    calling convention you can read. Sysl is the language the [SLIX](https://github.com/edadma/trisc)
+    microkernel is written in.
+  </Card>
+
+  <Card title="Compilers and tools" icon="puzzle">
+    Generic tagged unions, exhaustive `match`, `?` on `Result[T, E]`, and a literate
+    programming format (`.lsysl`) make it natural to write parsers, type-checkers, and
+    backends in a single file that's half prose, half code.
+  </Card>
+
+  <Card title="Teaching systems" icon="pencil">
+    Sysl targets [TRISC](https://github.com/edadma/trisc), a 16-bit RISC teaching ISA with a
+    deterministic emulator. You can see exactly which assembly instructions every language
+    feature lowers to — or switch the backend to LLVM for native speed.
+  </Card>
+
+  <Card title="Embedded and bare metal" icon="rocket">
+    Opt out of the heap entirely. Non-escaping closures capture on the caller's stack. Raw
+    pointers, fixed arrays, and `const`-folded compile-time arithmetic give you C-level
+    control without C's footguns.
+  </Card>
 </CardGrid>
+
+---
+
+## Three ways to own memory
+
+The same struct works three different ways at the use site. Pick the one that fits the
+problem — the type system tracks which is which, and refuses to mix them by accident.
+
+<Tabs>
+<TabItem label="Value (stack)">
+
+```sysl
+struct Point
+    x: int
+    y: int
+
+main() -> int
+    // Bitwise copy, lives on the stack, no refcount, no allocator.
+    var p = Point(10, 20)
+
+    p.x + p.y
+```
+
+</TabItem>
+<TabItem label="Ref (heap, counted)">
+
+```sysl
+struct Point
+    x: int
+    y: int
+
+main() -> int
+    // Heap allocation with a refcount header. Frees itself at rc = 0.
+    val p = new Point(10, 20)       // type: &Point
+
+    p.x + p.y
+```
+
+</TabItem>
+<TabItem label="Pointer (raw)">
+
+```sysl
+struct Point
+    x: int
+    y: int
+
+main() -> int
+    var p = Point(10, 20)
+    val q: *Point = &p              // raw, unmanaged
+
+    q.x + q.y                       // auto-deref on field access
+```
+
+</TabItem>
+</Tabs>
+
+- `ref → pointer` is `&r` (unsafe, no refcount change).
+- `pointer → ref` is **always an error** — you can't manufacture a refcount.
+- `value → ref` is `new Point(v)` — one call, one free.
+
+---
+
+## Features that are actually distinctive
+
+<CardGrid>
+  <Card title="Design by contract" icon="approve-check">
+    `require`, `ensure`, loop `variant` / `invariant`, struct `invariant`, `old(expr)` to
+    capture values at function entry — all checked at runtime by default, strippable with
+    `--no-contracts`.
+
+```sysl
+increment(p: *int)
+    ensure *p == old(*p) + 1
+    *p = *p + 1
+```
+  </Card>
+
+  <Card title="Range-typed integers" icon="setting">
+    Ada-style `within` constraints and `where` predicates on any numeric type, plus
+    `T::First`, `T::Succ`, `T::Valid`, and the rest of the attribute family.
+
+```sysl
+type Age = int within 0..150
+type Even = int where value % 2 == 0
+```
+  </Card>
+
+  <Card title="Tagged unions + `?`" icon="pencil">
+    Rust-style enums with exhaustiveness checking and a postfix `?` that unwraps
+    `Some` / `Ok` or early-returns the failure variant.
+
+```sysl
+parse_pair(s: string) -> Option[int]
+    val a = parseInt(s, 0)?
+    val b = parseInt(s, 3)?
+    Some(a + b)
+```
+  </Card>
+
+  <Card title="`not null` pointers" icon="seti:lock">
+    A subtype of `*T` with a runtime check at every produce site. Use it at API boundaries;
+    inside, you get the same machine code.
+
+```sysl
+head(xs: *Node not null) -> int
+    xs.value
+```
+  </Card>
+
+  <Card title="`#pure` enforcement" icon="star">
+    Mark a function `#pure` and the compiler statically checks it performs no observable
+    side effects. Great for constant folding and for knowing your hashing code can't
+    accidentally allocate.
+  </Card>
+
+  <Card title="Literate programming" icon="document">
+    `.lsysl` files are Markdown with indented code blocks. The prose is real prose — bold,
+    tables, KaTeX, block quotes — and the tangled code compiles identically to `.sysl`.
+  </Card>
+</CardGrid>
+
+---
+
+## Writing MMIO
+
+Sysl's `volatile` keyword on struct fields stops the compiler from coalescing or reordering
+loads and stores. Combined with a `*T not null` cast from an integer address, it gives you
+the register-level control kernels need — without assembly.
+
+```sysl
+struct UartRegs
+    volatile status: u32
+    volatile data:   u32
+    baud:            int            // normal field — optimisable
+
+const UART_BASE = 0x10000000
+const TX_READY  = 0x20
+
+uart_putc(c: int)
+    val regs = *UartRegs not null(UART_BASE)
+
+    while (regs.status & TX_READY) == 0 do { }   // poll until ready
+
+    regs.data = u32(c)
+
+puts(s: string)
+    for c in s do uart_putc(int(c))
+```
+
+Swap `TX_READY` and the register layout for your device. Swap the backend to LLVM if you
+want an x86 or ARM binary, or stay on TRISC to run it in the teaching emulator.
+
+---
+
+## Standard library, designed in the open
+
+The standard library in [`trisc/std/`](https://github.com/edadma/trisc/tree/dev/std) is written
+in literate Sysl — you can read the prose and the implementation in the same file.
+
+<CardGrid>
+  <LinkCard title="strings" href="/stdlib/strings/" description="Searching, trimming, case conversion — byte-oriented operations on `string` values." />
+  <LinkCard title="regex" href="/stdlib/regex/" description="POSIX regex engine implemented as a Pike VM. O(n·m), no catastrophic backtracking." />
+  <LinkCard title="crypto" href="/stdlib/crypto/" description="ChaCha20, SHA-256, HMAC, PBKDF2 — enough to build a login system." />
+  <LinkCard title="container" href="/stdlib/overview/" description="Heaps, hash tables, red-black trees. All generic, all monomorphised." />
+  <LinkCard title="io / bufio" href="/stdlib/overview/" description="Streaming I/O primitives and buffered readers/writers." />
+  <LinkCard title="encoding" href="/stdlib/overview/" description="Hex, base64, and friends." />
+</CardGrid>
+
+---
+
+## Three backends, same source
+
+<Tabs>
+<TabItem label="Interpreter">
+
+```bash
+# Tree-walk interpreter — great for tests, development, REPL-style work.
+sysl run hello.sysl
+```
+
+Fastest turnaround. Runs anywhere Scala runs (JVM, Node, native).
+
+</TabItem>
+<TabItem label="TRISC">
+
+```bash
+# Compile to TRISC assembly, assemble, link, run in the emulator.
+sysl compile hello.sysl --emit tof -o hello.tof
+trisc run hello.tof
+```
+
+TRISC is a 16-bit RISC teaching ISA — five instruction formats, twenty exception vectors,
+predictable cycle counts. You can step through the generated code instruction by instruction.
+
+</TabItem>
+<TabItem label="LLVM">
+
+```bash
+# Compile to LLVM IR, link against a runtime, produce a native binary.
+sysl compile hello.sysl --backend llvm --emit ll -o hello.ll
+clang hello.ll -o hello
+```
+
+Full LLVM optimisation pipeline. Same source code, native performance.
+
+</TabItem>
+</Tabs>
+
+---
+
+## Start here
+
+<LinkCard
+  title="Introduction"
+  description="Design principles, quick comparison to C / Go / Rust, what Sysl is and isn't."
+  href="/guides/introduction/"
+/>
+
+<LinkCard
+  title="Installation"
+  description="Get the sbt build working and run your first .sysl file in under five minutes."
+  href="/guides/installation/"
+/>
+
+<LinkCard
+  title="Hello, Sysl"
+  description="Your first program on each of the three backends, with the generated assembly."
+  href="/guides/hello-sysl/"
+/>
+
+<LinkCard
+  title="Tour of the language"
+  description="A whirlwind walk through every major feature with runnable examples."
+  href="/guides/tour/"
+/>
+
+<LinkCard
+  title="Language reference"
+  description="Precise, normative description of the type system, syntax, and semantics."
+  href="/reference/types/"
+/>
+
+<LinkCard
+  title="Standard library"
+  description="Strings, regex, crypto, containers, I/O — all written in literate Sysl."
+  href="/stdlib/overview/"
+/>
