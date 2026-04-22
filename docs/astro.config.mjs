@@ -5,6 +5,7 @@ import syslGrammar from './src/grammars/sysl.tmLanguage.json';
 
 // https://astro.build/config
 export default defineConfig({
+	site: 'https://sysl.sh',
 	integrations: [
 		starlight({
 			title: 'SysL Documentation',
