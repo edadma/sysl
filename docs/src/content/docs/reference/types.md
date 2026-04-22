@@ -89,6 +89,34 @@ struct Node
     next: *Node          // recursive via pointer
 ```
 
+### Struct invariants
+
+A struct may declare one or more `invariant <bool>` clauses among its fields. Each invariant is type-checked at declaration time (must be `bool`) and re-evaluated at every check site on a value of that struct type. Bare field names are in scope; module-level `const`s and globals are also in scope.
+
+```sysl
+struct Account
+    balance: int
+    limit: int
+    invariant balance >= -limit
+
+struct Range
+    lo: int
+    hi: int
+    invariant lo <= hi
+    invariant hi - lo <= 100        // multiple clauses: all must hold
+```
+
+A violating mutation traps via the standard contract-check path. Invariants fire on:
+
+- **construction-site init:** `var a: Account = Account(0, 100)`
+- **whole-value reassignment:** `a = Account(50, 100)`
+- **field assignment:** `a.balance = -200` (also through pointer/ref: `(*p).balance = -200`)
+- **field compound assignment:** `a.balance -= 50`
+
+The invariant expression is re-evaluated at each check site, so an invariant that mentions a side-effecting expression re-runs those side effects. Use plain field reads.
+
+`--no-contracts` strips the runtime check while keeping the type check.
+
 ## Enums (simple)
 
 Simple enums are integer constants with auto-incrementing values:
@@ -206,6 +234,63 @@ Plain aliases are transparent names for existing types:
 type IntPtr = *int
 type Callback = (int) -> int
 ```
+
+## Type attributes (`T::Attr`)
+
+Range-constrained types and simple enums expose their metadata through `::`-suffixed attributes. They work like Ada's `'Attr` notation, retargeted to sysl's `::` separator.
+
+```sysl
+type Age = int within 0..150
+enum Day { Mon; Tue; Wed; Thu; Fri; Sat; Sun }
+
+Age::First           // 0
+Age::Last            // 150
+Age::Range           // for-loop sugar (see below)
+
+Day::First           // Mon  (value 0)
+Day::Last            // Sun  (value 6)
+Day::Image(d)        // "Tue"      for d = Day.Tue
+Day::Value("Tue")    // Day.Tue    parses a string back to its variant
+Day::Pos(d)          // 1          for d = Day.Tue
+Day::Val(2)          // Day.Wed    variant at position n
+Day::Succ(d)         // Wed        for d = Day.Tue
+Day::Pred(d)         // Mon        for d = Day.Tue
+
+Age::Succ(a)         // a + 1, traps if a is already 150
+Age::Pred(a)         // a - 1, traps if a is already 0
+Age::Valid(raw)      // bool — true iff raw is in 0..150, never traps
+```
+
+| Attribute     | Applies to                              | Result                                                |
+|---------------|-----------------------------------------|-------------------------------------------------------|
+| `T::First`    | `within`-constrained int, simple enum   | lower bound / first variant's value                   |
+| `T::Last`     | `within`-constrained int, simple enum   | upper bound (minus 1 if `..<`) / last variant         |
+| `T::Range`    | same                                    | only valid in `for i in T::Range` — inclusive scan    |
+| `T::Image(x)` | simple enum, constrained numeric type   | variant name string / `str(x)` for numerics           |
+| `T::Value(s)` | simple enum                             | variant whose name equals `s`; traps on no match      |
+| `T::Valid(x)` | `within`-constrained int, simple enum   | bool — does `x` satisfy the constraint? never traps   |
+| `T::Pos(x)`   | simple enum                             | 0-based declaration position                          |
+| `T::Val(n)`   | simple enum                             | variant at position `n`; traps on out-of-range        |
+| `T::Succ(x)`  | `within`-constrained int, simple enum   | next value; traps at the upper end                    |
+| `T::Pred(x)`  | `within`-constrained int, simple enum   | previous value; traps at the lower end                |
+
+**Lowering.** `::First` and `::Last` fold to compile-time constants. `::Valid` on a `within`-int type folds to an inline `x >= lo && x <= hi` (or `< hi` for `..<`). The rest lower to synthesized helper functions (`__image_T`, `__value_T`, `__valid_T`, `__pos_T`, `__val_T`, `__succ_T`, `__pred_T`) emitted once per target type.
+
+**Trapping.** `::Pos` / `::Value` on an unknown input, `::Val` on an out-of-range position, `::Succ` past the upper bound, and `::Pred` past the lower bound all trap via the standard contract-check path. `::Valid` is the non-throwing complement — it returns a bool so the caller can branch:
+
+```sysl
+if Age::Valid(raw) then
+    var a: Age = raw           // safe: the range check will pass
+```
+
+`::Value` and `::Image` round-trip: `T::Value(T::Image(x)) == x` for every variant `x`.
+
+**`::Range` is for-loop sugar.** `for i in T::Range body` parses as `for i in T::First..T::Last body`. `for i in reverse T::Range body` desugars the other way, `for i in T::Last downTo T::First body`. Using `::Range` outside a for-loop is a compile error. See [Statements and Control Flow](/reference/statements-and-control-flow/) for the loop forms.
+
+**Limitations.**
+
+- Float-based `within` types do not yet support `::First` / `::Last` (and therefore none of the others).
+- `::Valid` is not yet stripped by `--no-contracts` since it is introspection, not a contract trap. Every other `::*` trap path is elided when contracts are disabled — invalid input then yields garbage (`-1` for enum helpers, `v+1` / `v-1` past the bound for `within` `::Succ`/`::Pred`).
 
 ## Three allocation modes
 

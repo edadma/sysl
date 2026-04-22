@@ -78,6 +78,34 @@ increment(p: *int)
 
 Contracts are not yet supported on expression-body functions or on closures.
 
+### Disabling contracts (`--no-contracts`)
+
+Pass `--no-contracts` to `sysl compile` or `sysl run` to elide every runtime contract check at compile time:
+
+```bash
+sysl compile --no-contracts main.sysl
+sysl run --no-contracts main.sysl
+```
+
+This is the equivalent of Ada's `pragma Assertion_Policy(Disable)` — the user takes responsibility for correctness in exchange for zero runtime overhead. The flag strips:
+
+- `require` / `ensure` clauses on functions
+- `invariant` statements inside loops
+- `variant` statements inside loops (the entire hoisted check state goes away)
+- struct `invariant` clauses (no per-assignment check)
+- `where`-predicate bodies (the synthesized predicate function still runs but performs no check)
+- `within`-range checks — both the compile-time literal check and the runtime range check
+- enum `T::Pos` / `T::Val` / `T::Value` / `T::Succ` / `T::Pred` and `within`-int `T::Succ` / `T::Pred` traps (the helper still returns a value, but invalid input yields garbage: `-1` for enum helpers, `v+1` / `v-1` past the bound for `within` helpers)
+
+What is **not** affected:
+
+- **Type checking.** Contract clauses still type-check at compile time regardless of the flag — only the runtime traps are elided. A clause that fails to compile still fails to compile with `--no-contracts`.
+- **`T::Valid(x)`.** Non-throwing introspection, never stripped.
+- **`#pure`.** A static analysis pass that always runs.
+- **`assert(cond, msg)`, `panic`, `abort`.** Explicit runtime calls, not contracts.
+
+The driver also accepts the equivalent build-config setting `contracts = "off"` (or `"false"` / `"disabled"`).
+
 ## Default parameter values
 
 Parameters may have default values. Any parameter with a default must come at the end of the parameter list; once a parameter has a default, all later parameters must too.

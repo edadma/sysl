@@ -93,6 +93,62 @@ Exit code is 0 iff all tests pass. Failing tests print the source file and line 
 
 **Test output capture.** Any output from `print`, `println`, `puts`, or `puti` inside a test is captured and displayed below the failure message if the test fails — useful for debugging intermediate values.
 
+## `#pure` — side-effect-free functions
+
+A function marked `#pure` is checked at compile time to have no observable side effects. Pure functions are a discipline-enforcement tool: any violation is an analysis error, never a warning.
+
+```sysl
+#pure
+square(x: int) -> int = x * x
+
+#pure
+fact(n: int) -> int
+    if n <= 1 then return 1
+    return n * fact(n - 1)
+
+#pure
+gcd(a: int, b: int) -> int
+    if b == 0 then return a
+    return gcd(b, a % b)
+```
+
+**Allowed inside `#pure`:**
+
+- Read parameters and module-level `const`s.
+- Declare and mutate **local** variables (they cannot escape).
+- Call other `#pure` functions, including recursion and mutual recursion.
+- Arithmetic, comparison, casts, and all control flow (`if` / `while` / `for` / `match` / `break` / `continue`).
+- Call `assert(cond, msg)` — termination is the only effect, consistent with Ada's `pragma Assert` policy.
+
+**Forbidden inside `#pure`:**
+
+- Calling any non-`#pure` user function (cross-function purity does not transit through impure callees).
+- Calling IO builtins: `puts`, `print`, `println`, `putchar`, `puti`.
+- Calling allocation builtins: `malloc`, `free`, `calloc`, `realloc`, `sbrk`.
+- Calling side-effecting traps with observable output: `panic`, `abort`, `expect`.
+- Writing to a module-level `var`.
+- Writing through a pointer (`*p = v`), an indexed slot (`arr[i] = v`), or a struct field (`p.f = v`) — the caller might see the write.
+- Increment / decrement of struct fields (`p.f++`).
+- Heap allocation (`new`), `append` to a slice, closure construction.
+- Indirect (function-pointer) calls and interface-dispatch calls.
+- `asm` blocks.
+
+```sysl
+var counter = 0
+
+#pure
+bad() -> int
+    puts("hi")               // ERROR: IO inside #pure
+    counter = counter + 1    // ERROR: writes module-level var
+    return counter
+```
+
+**Cross-module propagation.** `#pure` is carried through `.smeta` files (wire format: `FUNCP` / `DEFFUNCP` for pure, `FUNC` / `DEFFUNC` for impure; old smeta files without the `P` suffix round-trip as impure — the safe default for untrusted input). A `#pure` function in module A can freely call a `#pure` function in module B. Imported functions without `#pure` are still impure, so annotate library functions you intend to call from pure code.
+
+**Interaction with `--no-contracts`.** `#pure` is a *static* check and always runs. The `--no-contracts` flag only elides *runtime* contract verification — it has no effect on `#pure` enforcement.
+
+**Future work.** Allow `#pure` calls inside `const` initializers and as default-parameter expressions, so `const TABLE = build_table(16)` becomes legal at compile time.
+
 ## `#deprecated` — warn on use
 
 Marks a function as deprecated. Calls emit a warning to stderr during analysis (once per callee per compilation):

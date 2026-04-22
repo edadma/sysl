@@ -189,6 +189,11 @@ for v in arr
 for i, v in arr
     body                        // i = index, v = arr[i]
 
+// Iterate backward — over a range, a T::Range, or a collection
+for i in reverse 0..<5          // 4, 3, 2, 1, 0
+for d in reverse Day::Range     // Sun, Sat, ..., Mon
+for v in reverse arr            // index len-1 down to 0
+
 // `in` as range membership operator
 x in 1..4                       // true if 1 <= x <= 4
 x in 1..<4                      // true if 1 <= x < 4
@@ -199,6 +204,53 @@ while true
     if done then break
     if skip then continue
     process()
+```
+
+`reverse` is a contextual keyword — it acts as one only directly after `in` in a for-loop. Existing identifiers named `reverse` (e.g. `std.slices.reverse`) are unaffected.
+
+### Named loops and labeled break / continue
+
+A loop (`for`, `while`, or `do`) can carry a name via a leading `label:` prefix. `break label` and `continue label` then target the named enclosing loop rather than the innermost one:
+
+```sysl
+outer: for i in 0..<rows
+    for j in 0..<cols
+        if grid[i][j] == target then break outer        // exits both loops
+        if grid[i][j] == 0 then continue outer          // next iteration of outer
+        use(grid[i][j])
+```
+
+Rules:
+
+- A label is an identifier followed by `:` immediately before `for`, `while`, or `do`.
+- Unlabeled `break` / `continue` always target the innermost enclosing loop, regardless of whether it has a label.
+- The same label cannot be used on a nested loop (would make `break label` ambiguous). Sibling (non-nested) reuse is fine.
+- Labels live in their own namespace — they do not collide with local variable names.
+- An unknown label, or a `break` / `continue` outside any loop, is a compile error.
+
+### Loop `variant` — termination witness
+
+`variant <expr>` at the top of a loop body asserts that `expr` strictly decreases between iterations and stays `>= 0`. The first iteration has no prior value to compare against and is exempt; every subsequent one traps if either condition is violated:
+
+```sysl
+var remaining = 100
+while remaining > 0
+    variant remaining               // monotonic-decrease witness
+    remaining = remaining - step()  // if step() ever returns <= 0, this traps
+```
+
+It works on `for`, `while`, and `do-while`. The clause must appear at the top level of the loop body — uses elsewhere (inside an `if`, after a regular statement, etc.) are rejected.
+
+Internally, the analyzer hoists an init flag and a previous-value slot out of the loop. `--no-contracts` elides the entire hoisted check state.
+
+`variant` is purely about termination; it does not enforce any other invariant. Pair it with `invariant` clauses for full state safety.
+
+```sysl
+// for-loop with both
+for i in 0..<n
+    invariant i >= 0
+    variant n - i
+    process(i)
 ```
 
 ## Destructuring and parallel assignment
