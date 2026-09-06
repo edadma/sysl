@@ -188,6 +188,17 @@ fold_is_not_lowercase()
 fold_of_empty()
     assert_eq(fold(""), "")
 
+// `U+1FA4` is an iota-subscript omega carrying its own extra combining mark (`U+0350`): casefolding
+// it turns the subscript into a plain trailing `ι`, which is spelled correctly only once the
+// canonical decomposition -- and the reordering that comes with it -- has already run. Fold to
+// `Casefold | Compose` directly and utf8proc applies the casefold mapping per character ahead of
+// reordering, so the character it introduces can land ahead of `U+0350` instead of behind it, where
+// its (higher) combining class says it belongs. Decomposing first is what keeps every mark in the
+// order Unicode caseless matching (UAX #21's `toNFD(toCaseFold(toNFD(x)))`) asks for.
+@test("folding reorders a casefold-introduced mark behind an existing combining character")
+fold_reorders_casefold_introduced_mark()
+    assert_eq(fold("\u{1FA4}\u{0350}"), "\u{1F64}\u{0350}\u{03B9}")
+
 // -- grapheme clusters ----------------------------------------------------------------------------
 
 // The third answer to *how long is this text*, and the one a person would give. `s.len` is bytes and

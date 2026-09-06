@@ -87,8 +87,18 @@ normalize(f: Form, s: string) -> string = mapped(s, options_of(f))
  *
  * The result is composed (`Nfc`), so folding is idempotent and two strings that fold alike compare
  * alike without a normalization pass of their own.
+ *
+ * **Decomposing is a pass of its own, before the fold rather than fused into it.** utf8proc's
+ * casefold mapping runs per code point ahead of canonical reordering, so folding a precomposed
+ * character straight to `Casefold | Compose` can leave a mark casefold introduces -- `U+0345
+ * COMBINING GREEK YPOGEGRAMMENI` out of a folded iota subscript is the one this module has seen --
+ * sitting in the position the *original* character held rather than where its combining class
+ * says it belongs. Decomposing first puts every mark utf8proc will ever see through the same
+ * reordering pass the fold itself performs, which is what Unicode caseless matching (UAX #21):
+ * `toNFD(toCaseFold(toNFD(x)))` asks for. `mapped` composes on the way back out, so this is the two
+ * calls that chain, not three.
  */
-fold(s: string) -> string = mapped(s, Stable | Compose | Casefold)
+fold(s: string) -> string = mapped(mapped(s, Stable | Decompose), Stable | Compose | Casefold)
 
 /** Measure, allocate, fill, re-encode -- the one pass every function above is.
  *
