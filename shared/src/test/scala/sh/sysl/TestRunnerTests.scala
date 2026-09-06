@@ -239,6 +239,38 @@ class TestRunnerTests extends AnyFreeSpec with CodegenSupport with TestFramework
       ran.head.output.exists(c => c == Tests.setupMark || c == Tests.testMark) shouldBe false
     }
 
+    // The mark is written with `write`, which the library also binds as an `extern` — so a build
+    // could end up with the symbol declared twice, and LLVM refuses that outright. The declaration
+    // is therefore made from the shape of the program, and a build with nothing to say does not make
+    // it at all: a module with no per-test hook pays not one instruction for the mechanism.
+    "the mark's 'write' is declared once, and only where there is a mark to make" in {
+      val plain = testIr("""@test
+                           |t() = 0
+                           |""".stripMargin)
+
+      plain should not include "@write"
+
+      val marked = testIr("""@setup
+                            |s() = 0
+                            |
+                            |@test
+                            |t() = 0
+                            |""".stripMargin)
+
+      marked.linesIterator.count(l => l.startsWith("declare") && l.contains("@write")) shouldBe 1
+    }
+
+    // An `_all` hook is a process of its own and reports by exiting, so it needs no mark and the
+    // declaration stays absent.
+    "an '_all' hook alone makes no mark and needs no 'write'" in {
+      testIr("""@setup_all
+               |boot() = 0
+               |
+               |@test
+               |t() = 0
+               |""".stripMargin) should not include "@write"
+    }
+
     "a module with no hooks runs exactly the processes it always ran" in {
       allPass("""@test
                 |t() =
