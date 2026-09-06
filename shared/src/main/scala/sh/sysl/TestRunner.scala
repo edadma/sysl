@@ -16,6 +16,15 @@ import io.github.edadma.cross_platform.*
  * framework: a broken `require`, a bounds violation, an `unwrap` of `None` — each ends the process,
  * and none of them needed to know it was running under a test. `@test(should_trap)` inverts the
  * reading for a test whose subject *is* the check.
+ *
+ * **A module's hooks are read against that protocol rather than beside it**
+ * (`reference/attributes.md § The hooks a module may write`). `@setup` and `@teardown` run in the
+ * test's own process, which is what lets a setup leave something for the test to find — and is why
+ * a teardown after a test that trapped runs in a process of its own instead, there being nothing
+ * left of the first one. `@setup_all` and `@teardown_all` are their own invocations, so a module
+ * reaches its tests from one of them only through what outlives a process. Which part of a run
+ * ended it cannot be read from an exit status, so the dispatcher marks each boundary it crosses
+ * (`Tests.setupMark`).
  */
 object TestRunner {
 
@@ -30,6 +39,11 @@ object TestRunner {
 
   /** One test, run. `detail` is absent exactly when the test passed; `output` is everything the run
    * printed, on either stream, which a failure shows and a pass keeps to itself.
+   *
+   * **A row for a `@setup_all` or `@teardown_all` that did not come back is one of these too**, with
+   * the hook standing in for the test: a hook that runs alone has no test to hang its failure on,
+   * and what a row needs is a name, a file and a line, which a hook has. So the report grows a row
+   * rather than a second kind of row, and the header counts the tests instead of counting the rows.
    */
   case class Outcome(test: TTest, detail: Option[String], output: String, millis: Long) {
     def passed: Boolean = detail.isEmpty
