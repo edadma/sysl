@@ -38,6 +38,32 @@ package sh.sysl
  */
 object Tests {
 
+  /** The byte the test dispatcher writes to standard error once `@setup` has returned
+   * (`Codegen.genTestMain`).
+   *
+   * **A dead process cannot report which part of it died**, and that is the whole of why a byte is
+   * written at all: `setup(); test(); teardown()` runs in one process, a fault anywhere in it ends
+   * that process, and the exit status is the same however far it got. So the dispatcher leaves a
+   * mark as it crosses each boundary, and the runner reads how far the run reached off what arrived.
+   *
+   * The two marks are control characters no source text can hold — neither survives the lexer, so
+   * a test's own output cannot forge one. Both are stripped from what a failure shows: they are the
+   * runner's channel and not the test's.
+   */
+  val setupMark: Char = 1
+
+  /** The byte the dispatcher writes once the test itself has returned, before `@teardown` is called.
+   * Present means teardown was entered — so a process that then died died in teardown, and one
+   * that never wrote it left teardown to a process of its own (`TestRunner.execute`).
+   */
+  val testMark: Char = 2
+
+  /** A run's output as a reader should see it: the marks above taken out. */
+  def unmarked(output: String): String =
+    if output.exists(marked) then output.filterNot(marked) else output
+
+  private def marked(c: Char): Boolean = c == setupMark || c == testMark
+
   /** The requirements a `@test` function meets, checked at the declaration.
    *
    * They say the same thing from different sides: **the runner must be able to call it with nothing
@@ -52,14 +78,18 @@ object Tests {
    * Each is reported where the attribute is rather than where the signature is, because the attribute
    * is the part that is wrong: the function is a perfectly good function, and it is `@test` that made
    * a promise about it that it cannot keep.
+   *
+   * `what` is the attribute the message names, since the four hooks are held to exactly these rules
+   * and for exactly this reason: the runner calls a hook with nothing, in a process of its own or in
+   * a test's, and reads the answer off whether it came back.
    */
-  def problem(f: FuncDecl): Option[String] =
+  def problem(f: FuncDecl, what: String = "test"): Option[String] =
     if f.params.nonEmpty then
-      Some(s"a '@test' function takes no parameters, and '${Modules.bare(f.name)}' takes " +
+      Some(s"a '@$what' function takes no parameters, and '${Modules.bare(f.name)}' takes " +
         (if f.params.length == 1 then "one" else s"${f.params.length}") +
         " — 'sysl test' calls it with nothing, so there is nowhere for an argument to come from")
     else if f.tparams.nonEmpty then
-      Some(s"a '@test' function has no type parameters, and '${Modules.bare(f.name)}' declares " +
+      Some(s"a '@$what' function has no type parameters, and '${Modules.bare(f.name)}' declares " +
         s"'${f.tparams.mkString(", ")}' — a generic is compiled for the arguments a caller fixes, and " +
         "the runner supplies none")
     else None
@@ -73,11 +103,13 @@ object Tests {
    * nothing is going to look at — which is a mistake about how the test reports, and the sort that
    * ends with someone believing an assertion ran.
    */
-  def resultProblem(f: FuncDecl, retTy: Type): Option[String] =
+  def resultProblem(f: FuncDecl, retTy: Type, what: String = "test"): Option[String] =
     Option.when(!Type.noValue(retTy))(
-      s"a '@test' function returns nothing, and '${Modules.bare(f.name)}' returns " +
-        s"'${Type.show(retTy)}' — a test's result is whether it came back, so there is nothing to read a " +
-        "value with")
+      s"a '@$what' function returns nothing, and '${Modules.bare(f.name)}' returns " +
+        s"'${Type.show(retTy)}' — " +
+        (if what == "test" then "a test's result is whether it came back"
+         else "a hook is called for what it does rather than for what it answers") +
+        ", so there is nothing to read a value with")
 
   /** Every name one top-level declaration binds, unqualified — what a `@tests` file has to be read
    * for, so that what it declared can be recognised again once hoisting has flattened the files
@@ -123,6 +155,37 @@ object Tests {
       attr.pos.map(_.line).getOrElse(0),
     )
 
+  /** What the runner is told about one hook: which moment it is for, the key that calls it, and
+   * where it was written.
+   *
+   * There is no reported name to choose, unlike a test's: a hook is shown by the name it was
+   * declared under, because the only reason a report ever mentions one is that it did not come back,
+   * and the reader's next move is to find that declaration.
+   */
+  def describeHook(key: String, attr: HookAttr): THook =
+    THook(
+      attr.kind,
+      key,
+      attr.pos.map(_.source.name).getOrElse("<unknown>"),
+      attr.pos.map(_.line).getOrElse(0),
+    )
+
+  /** The refusal of a second hook of one kind in one module.
+   *
+   * **Two of them would both have to run, and nothing decides in which order** — which is not a
+   * detail a program could work around, since the whole point of a setup is that what it leaves
+   * behind is what the test finds. So the second is refused, and the message names the first: the
+   * reader's question is "where is the other one", and a diagnostic that made them grep for it would
+   * have been holding the answer.
+   */
+  def duplicateHook(kind: HookKind, module: String, first: THook, second: String): String =
+    s"a module writes at most one '@${kind.word}', and " +
+      (if module == Modules.root then "this one" else s"'${Modules.show(module)}'") +
+      " already has one — " +
+      s"'${Modules.bare(first.func)}' at ${first.file}:${first.line}, and now " +
+      s"'${Modules.bare(second)}'. Both would run at the same moment, and nothing says in which " +
+      "order; write one hook and have it call what it needs"
+
   /** The same program with every test and every test file dropped — the tree a build that is not
    * `sysl test` lowers.
    *
@@ -156,7 +219,10 @@ object Tests {
    */
   def strip(program: TProgram): TProgram = {
     val tests = program.tests.map(_.func).toSet
-    val gone  = tests ++ program.testOnly
+    // A hook goes with the tests it brackets, and is read from the program rather than from the
+    // tests for the reason `TProgram.hooks` records: a module may declare one and no tests, and a
+    // hook left behind is a function nothing calls in a build that runs nothing.
+    val gone  = tests ++ program.hooks.map(_.func) ++ program.testOnly
 
     if gone.isEmpty then program
     else
@@ -166,6 +232,7 @@ object Tests {
         vals = program.vals.filterNot(v => gone(v.symbol)),
         externs = program.externs.filterNot(e => gone(e.name)),
         tests = Nil,
+        hooks = Nil,
         testOnly = Set.empty,
       )
   }
@@ -187,12 +254,13 @@ object Tests {
   def stripSource(units: List[Program]): List[Program] =
     units.filterNot(_.testOnly).map(u => u.copy(body = u.body.filter(kept)))
 
-  /** Whether a top-level statement survives into a library. Only a `@test` function does not — an
+  /** Whether a top-level statement survives into a library. Only a `@test` function and the hooks
+   * around one do not — an
    * `impl` may not sit in a `@tests` file at all (`reference/attributes.md § @tests — a file of scaffolding`), so nothing here has to reason about
    * a method table with a slot filled by something that is about to go.
    */
   private def kept(stmt: Stmt): Boolean = stmt match
-    case f: FuncDecl => f.test.isEmpty
+    case f: FuncDecl => f.test.isEmpty && f.hook.isEmpty
     case _           => true
 
   /** The same program lowered **as** a test build: the tests kept, and the program's own entry point
@@ -222,7 +290,12 @@ object Tests {
   def only(program: TProgram, own: Option[Set[String]] = None): TProgram = {
     val kept    = program.copy(main = Nil, entry = None)
     val entries = Reachability.entryPoints(kept, own)
-    val roots   = List(kept.vals, kept.vtables, kept.tests.map(t => TEntry(t.func, None)), entries)
+    // The hooks are roots beside the tests, and for the same reason: the dispatcher lays down an arm
+    // that calls each by name, so a hook the walk could not reach from a test — which is every one
+    // of them, since nothing calls a hook — would be pruned out from under its own arm.
+    val roots   = List(kept.vals, kept.vtables,
+                       (kept.tests.map(_.func) ::: kept.hooks.map(_.func)).map(TEntry(_, None)),
+                       entries)
     val live    = Reachability.reachedFrom(roots, kept.funcs, kept.vtables).calls ++ entries.map(_.name)
 
     kept.copy(

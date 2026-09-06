@@ -71,10 +71,11 @@ object Escape {
 
 private class Escape(program: TProgram) {
 
-  /** The `@test` functions by name, which `program.testOnly` does not carry: that set is what a
-   * `@tests` *file* declared, and a test may be written in an ordinary file beside what it tests.
+  /** The `@test` functions and the hooks around them, by name, which `program.testOnly` does not
+   * carry: that set is what a `@tests` *file* declared, and either may be written in an ordinary
+   * file beside what it tests.
    */
-  private val testFuncs: Set[String] = program.tests.map(_.func).toSet
+  private val testFuncs: Set[String] = (program.tests.map(_.func) ::: program.hooks.map(_.func)).toSet
 
   private val funcs = program.funcs.map(f => f.name -> f).toMap
 

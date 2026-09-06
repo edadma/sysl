@@ -342,7 +342,46 @@ case class TTest(
     expected: Option[String],
     file: String,
     line: Int,
+    /** The hooks the test's own module declared, resolved onto every test in it
+      * (`reference/attributes.md § The hooks a module may write`).
+      *
+      * Carried per test rather than per program because the runner is handed a list of tests and
+      * nothing else — a cached suite comes back from a sidecar with no program behind it at all —
+      * and because what a test needs to know is which hooks bracket *it*.
+      */
+    hooks: THooks = THooks(),
 )
+
+/** One hook function, as the runner needs it: what to call, and where to point a reader when the
+ * call does not come back.
+ *
+ * A hook has no `display` of its own — a report shows it by the name it was declared under, which is
+ * what a reader greps for. The file and line are the attribute's, for `TTest`'s reason.
+ */
+case class THook(kind: HookKind, func: String, file: String, line: Int)
+
+/** The four hooks a module may declare, each present or not.
+ *
+ * A record of four options rather than a list, because the four are not interchangeable: the runner
+ * asks for one of them by name at four different moments, and a list would make every one of those
+ * a search that could come back with the wrong kind.
+ */
+case class THooks(
+    setup: Option[THook] = None,
+    teardown: Option[THook] = None,
+    setupAll: Option[THook] = None,
+    teardownAll: Option[THook] = None,
+) {
+  def all: List[THook] = List(setup, teardown, setupAll, teardownAll).flatten
+}
+
+object THooks {
+
+  /** The four, picked out of everything one module declared. */
+  def of(hooks: List[THook]): THooks =
+    THooks(hooks.find(_.kind == HookKind.Setup), hooks.find(_.kind == HookKind.Teardown),
+           hooks.find(_.kind == HookKind.SetupAll), hooks.find(_.kind == HookKind.TeardownAll))
+}
 
 /** A whole program: hoisted struct, enum, and function declarations, the method tables its trait
  * objects dispatch through, the externs it calls, the module-level `val`s it reads, plus the
@@ -420,6 +459,15 @@ case class TProgram(
      * drops both this and the functions it names: `Tests.strip`.
      */
     tests: List[TTest] = Nil,
+    /** Every hook the sources declared, across every module
+      * (`reference/attributes.md § The hooks a module may write`).
+      *
+      * `tests` carries the same functions again, grouped onto the tests they bracket; this is the
+      * flat list, and it is what the questions asked of the *tree* need. A module may declare a hook
+      * and no tests, so a walk that read the hooks off `tests` would leave those behind — which is a
+      * hook surviving into a build that runs no tests, and it is exactly what `Tests.strip` is for.
+      */
+    hooks: List[THook] = Nil,
     /** The `extern` variables the program reads or writes (`reference/ffi.md § An extern also declares a variable`). Declared beside the `val`s
      * rather than up with the `extern` functions, because a named aggregate type has to be defined
      * before anything names it — the same ordering the precompiled declarations need.

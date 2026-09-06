@@ -15,7 +15,7 @@ trait AttrParser extends ExprParser {
    * itself so that the annotation's own position is the `@`, which is the line a test report names.
    */
   protected lazy val attribute: PackratParser[Attr] =
-    testAttr ^^ Attr.Test.apply | tailrecAttr | pureAttr | ghostAttr | readsAttr | writesAttr |
+    testAttr ^^ Attr.Test.apply | hookAttr | tailrecAttr | pureAttr | ghostAttr | readsAttr | writesAttr |
       crossingAttr | needsAttr | packedAttr | alignAttr | exportAttr | sectionAttr | borrowsHere |
       unknownAttr | hashAttr
 
@@ -231,6 +231,34 @@ trait AttrParser extends ExprParser {
     err("'@test' closes what it opened — the description and 'should_trap' go between parentheses, " +
       "and there is no ')' here to end them")
 
+  /** `@setup`, `@teardown`, `@setup_all` and `@teardown_all` — what a module runs around its tests
+   * (`reference/attributes.md § The hooks a module may write`).
+   *
+   * None of the four takes an argument, and there is nothing one could take: a hook is called by the
+   * runner with nothing, exactly as a test is, and what it does is its body. The alternatives are
+   * written longest-first out of habit rather than necessity — `attrWord` matches a whole
+   * identifier, so `setup_all` is never read as `setup` followed by something.
+   *
+   * The position kept is the `@`, for `@test`'s reason: it is the line a report points at when the
+   * hook is what failed, and a hook failure has no diagnostic of its own to carry one.
+   */
+  protected lazy val hookAttr: PackratParser[Attr] =
+    at(op("@") ~> hookWord <~ noHookArgs) ^^ Attr.Hook.apply
+
+  private lazy val hookWord: Parser[HookAttr] =
+    attrWord("setup_all") ^^ (_ => HookAttr(HookKind.SetupAll)) |
+      attrWord("teardown_all") ^^ (_ => HookAttr(HookKind.TeardownAll)) |
+      attrWord("setup") ^^ (_ => HookAttr(HookKind.Setup)) |
+      attrWord("teardown") ^^ (_ => HookAttr(HookKind.Teardown))
+
+  /** An argument list after a hook, which is a sentence rather than a parse failure for `@test`'s
+   * reason: the word has been read, so there is nothing else the line could have been, and leaving
+   * the `(` unread sends the statement rule on to refuse the perfectly ordinary declaration below.
+   */
+  private def noHookArgs: Parser[Unit] =
+    guard(op("(")) ~> err("a hook takes no arguments — when it runs is what the word says, and what " +
+      "it does is its body. There is nothing left for a parenthesis to carry") | success(())
+
   /** `@tailrec` — the assertion that this function's call to itself is the last thing it does
    * (`reference/declarations.md § Tail calls`). It takes no arguments: there is nothing to
    * configure about a jump, and what the annotation buys is the refusal when there is no jump to
@@ -366,7 +394,8 @@ trait AttrParser extends ExprParser {
 
   private lazy val unknownAttr: PackratParser[Attr] =
     op("@") ~> ident >> (n =>
-      err(s"'$n' is not an annotation a declaration takes — '@test', '@tailrec', '@pure', " +
+      err(s"'$n' is not an annotation a declaration takes — '@test', '@setup', '@teardown', " +
+        "'@setup_all', '@teardown_all', '@tailrec', '@pure', " +
         "'@ghost', '@export', '@reads(...)', '@writes(...)' and '@crossing(...)' mark a function, " +
         "'@packed' and " +
         "'@align(n)' mark a struct's layout, '@export(\"...\")' names a struct in a generated C " +
@@ -409,6 +438,16 @@ trait AttrParser extends ExprParser {
       },
     )
 
+  /** Whether an attribute says **when `sysl test` calls** the function under it, for the refusal of
+   * two such attributes above one declaration.
+   *
+   * `@test` and the four hooks are the members, and they are alternatives rather than a set: each
+   * names a different moment, and a declaration carrying two would have to be called at both.
+   */
+  protected def runnerRole(a: Attr): Boolean = a match
+    case _: Attr.Test | _: Attr.Hook => true
+    case _                           => false
+
   /** Whether an attribute is one half of a frame, for the refusal of `@pure` beside one. */
   protected def frame(a: Attr): Boolean = a match
     case _: Attr.Reads | _: Attr.Writes => true
@@ -421,6 +460,7 @@ trait AttrParser extends ExprParser {
   protected def attributed(f: FuncDecl, as: List[Attr]): FuncDecl =
     as.foldLeft(f) {
       case (d, Attr.Test(t)) => d.copy(test = Some(t))
+      case (d, Attr.Hook(h)) => d.copy(hook = Some(h))
       case (d, Attr.TailRec) => d.copy(tailrec = true)
       case (d, Attr.Pure)    => d.copy(pure = true)
       case (d, Attr.Ghost)   => d.copy(ghost = true)

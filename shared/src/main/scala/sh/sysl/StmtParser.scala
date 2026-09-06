@@ -171,6 +171,13 @@ trait StmtParser
       duplicated(as) match
         case Some(dup) =>
           err(s"'@$dup' is written twice above one declaration, and it says nothing the once does not")
+        // `@test` and the four hooks each say *when* `sysl test` calls the function, and they name
+        // four different moments. Two of them above one declaration is not a stricter request; it is
+        // two requests, and nothing decides which is honoured.
+        case None if as.count(runnerRole) > 1 =>
+          err(as.filter(runnerRole).map(a => s"'@${a.word}'").mkString("", " and ", "") +
+            " each say when 'sysl test' calls this function, and they name different moments — a " +
+            "function is a test or one of the hooks around one, and it is called once")
         // `@pure` *is* `@reads() @writes()` plus the further bans of `reference/verification.md §
         // @pure`, so the two together say one thing twice — and worse, they could be made to
         // disagree, which would leave nothing to say which of the two claims the function was held

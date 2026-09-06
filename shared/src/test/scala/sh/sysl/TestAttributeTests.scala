@@ -122,6 +122,11 @@ class TestAttributeTests extends AnyFreeSpec with CodegenSupport with RunSupport
       for known <- List("@test", "@tailrec", "@pure", "@ghost", "@packed", "@align") do
         message should include(known)
 
+      // The hooks joined the set with the runner's own scaffolding, and are named for the reason
+      // every other member is: a reader who wrote `@before` has the right idea and the wrong word.
+      for known <- List("@setup", "@teardown", "@setup_all", "@teardown_all") do
+        message should include(known)
+
       // The header's three are named too, and for the reason the four above are: a reader who wrote
       // `@link` over a function has the right annotation in the wrong place, and the message that
       // only listed what a *declaration* takes would leave them looking for a name that is not
@@ -319,6 +324,233 @@ class TestAttributeTests extends AnyFreeSpec with CodegenSupport with RunSupport
     // below gets the better message, which is the one a reader will meet.
     "an attribute at the end of a file has nothing to attach to" in {
       err("@test\n") should not be empty
+    }
+  }
+
+
+  "the hooks a module writes around its tests" - {
+    def hookOf(src: String): HookAttr =
+      parsed(src).collectFirst { case f: FuncDecl if f.hook.isDefined => f.hook.get } match {
+        case Some(a) => a
+        case None    => fail(s"no hook function was parsed from:\n$src")
+      }
+
+    "each of the four is its own moment" in {
+      hookOf("@setup\ns() = 0\n").kind shouldBe HookKind.Setup
+      hookOf("@teardown\nd() = 0\n").kind shouldBe HookKind.Teardown
+      hookOf("@setup_all\ns() = 0\n").kind shouldBe HookKind.SetupAll
+      hookOf("@teardown_all\nd() = 0\n").kind shouldBe HookKind.TeardownAll
+    }
+
+    // `setup_all` is a whole identifier, so nothing has to order the alternatives to keep it from
+    // being read as `setup` with a stray word after it — asserted because the opposite reading is
+    // what a longest-match grammar would have needed a rule for.
+    "'setup_all' is not 'setup' with something after it" in {
+      hookOf("@setup_all\ns() = 0\n").kind should not be HookKind.Setup
+    }
+
+    "a hook takes no arguments" in {
+      err("""@setup("once")
+            |s() = 0
+            |""".stripMargin) should include("a hook takes no arguments")
+    }
+
+    "the position a report points at is the attribute's" in {
+      Compiler.compileTests(List(Source("m.sysl", """double(n: int) -> int = n * 2
+                                                    |
+                                                    |@setup
+                                                    |s() = 0
+                                                    |
+                                                    |@test
+                                                    |t() = 0
+                                                    |""".stripMargin)), Nil) match {
+        case Right((_, tests)) =>
+          tests.head.hooks.setup.map(h => (h.func, h.file, h.line)) shouldBe Some(("s", "m.sysl", 3))
+        case Left(e) => fail(e)
+      }
+    }
+
+    "a module's tests all carry that module's hooks" in {
+      Compiler.compileTests(List(Source("m.sysl", """module m
+                                                    |
+                                                    |@setup
+                                                    |s() = 0
+                                                    |
+                                                    |@test
+                                                    |one() = 0
+                                                    |
+                                                    |@test
+                                                    |two() = 0
+                                                    |""".stripMargin, List("m"))), Nil) match {
+        case Right((_, tests)) =>
+          tests.map(_.hooks.setup.map(_.func)) shouldBe List(Some("m$s"), Some("m$s"))
+        case Left(e) => fail(e)
+      }
+    }
+
+    // The scope is the module and nothing smaller, so two files of one module share one hook and two
+    // modules keep their own. The second half is what makes the refusal below a rule about a module
+    // rather than about a file.
+    "a hook reaches only the module that declared it" in {
+      Compiler.compileTests(files(
+        "a.sysl" -> """module a
+                      |
+                      |@setup
+                      |s() = 0
+                      |
+                      |@test
+                      |mine() = 0
+                      |""".stripMargin,
+        "b.sysl" -> """module b
+                      |
+                      |@test
+                      |theirs() = 0
+                      |""".stripMargin), Nil) match {
+        case Right((_, tests)) =>
+          tests.map(t => t.display -> t.hooks.setup.map(_.func)).toMap shouldBe
+            Map("mine" -> Some("a$s"), "theirs" -> None)
+        case Left(e) => fail(e)
+      }
+    }
+
+    "a second hook of one kind in one module is refused, and the message names both" in {
+      val message = errOf(
+        "a.sysl" -> """module a
+                      |
+                      |@setup
+                      |first() = 0
+                      |
+                      |@setup
+                      |second() = 0
+                      |
+                      |@test
+                      |t() = 0
+                      |""".stripMargin)
+
+      message should include("at most one '@setup'")
+      message should include("first")
+      message should include("second")
+      message should include("a.sysl:3")
+    }
+
+    "the same kind in two modules is two hooks and no complaint" in {
+      Compiler.compileTests(files(
+        "a.sysl" -> """module a
+                      |
+                      |@setup
+                      |s() = 0
+                      |
+                      |@test
+                      |mine() = 0
+                      |""".stripMargin,
+        "b.sysl" -> """module b
+                      |
+                      |@setup
+                      |s() = 0
+                      |
+                      |@test
+                      |theirs() = 0
+                      |""".stripMargin), Nil) match {
+        case Right((_, tests)) => tests.map(_.hooks.setup.map(_.func)) shouldBe List(Some("a$s"), Some("b$s"))
+        case Left(e)           => fail(e)
+      }
+    }
+
+    "the four kinds are four scopes, so all four may stand in one module" in {
+      Compiler.compileTests(List(Source("m.sysl", """module m
+                                                    |
+                                                    |@setup
+                                                    |up() = 0
+                                                    |
+                                                    |@teardown
+                                                    |down() = 0
+                                                    |
+                                                    |@setup_all
+                                                    |boot() = 0
+                                                    |
+                                                    |@teardown_all
+                                                    |halt() = 0
+                                                    |
+                                                    |@test
+                                                    |t() = 0
+                                                    |""".stripMargin, List("m"))), Nil) match {
+        case Right((_, tests)) =>
+          tests.head.hooks.all.map(_.func) should contain theSameElementsAs
+            List("m$up", "m$down", "m$boot", "m$halt")
+        case Left(e) => fail(e)
+      }
+    }
+
+    "two hooks above one declaration name two moments" in {
+      val message = err("""@setup
+                          |@teardown
+                          |s() = 0
+                          |""".stripMargin)
+
+      message should include("different moments")
+      message should include("'@setup'")
+      message should include("'@teardown'")
+    }
+
+    "'@test' beside a hook is the same mistake" in {
+      err("""@test
+            |@setup
+            |s() = 0
+            |""".stripMargin) should include("different moments")
+    }
+
+    "one hook written twice above one declaration is the ordinary repeat" in {
+      err("""@setup
+            |@setup
+            |s() = 0
+            |""".stripMargin) should include("written twice above one declaration")
+    }
+  }
+
+  "what a hook function may be is what the runner can call" - {
+    "a parameter has nowhere to come from, and the message names the hook" in {
+      val message = err("""@setup
+                          |s(n: int) =
+                          |    print(n)
+                          |""".stripMargin)
+
+      message should include("a '@setup' function takes no parameters")
+    }
+
+    "a generic has no compiled form until a caller fixes its arguments" in {
+      err("""@teardown_all
+            |d[T]() = 0
+            |""".stripMargin) should include("a '@teardown_all' function has no type parameters")
+    }
+
+    "a result is a value nothing is going to read" in {
+      err("""@setup_all
+            |s() -> int = 3
+            |""".stripMargin) should include("a '@setup_all' function returns nothing")
+    }
+  }
+
+  "a hook is scaffolding, and a build that runs nothing drops it" - {
+    // The same bargain a test gets: analyzed in every build, emitted in one. A hook that stopped
+    // being checked outside `sysl test` would rot exactly as an unchecked test would.
+    "a broken hook is an error in an ordinary build" in {
+      err("""@setup
+            |s() =
+            |    print(undefined_name)
+            |""".stripMargin) should include("undefined name 'undefined_name'")
+    }
+
+    "an ordinary build emits neither the hook nor what only it calls" in {
+      val out = ir("""only_the_hook_calls_me() = print("scaffolding")
+                     |
+                     |@setup
+                     |s() =
+                     |    only_the_hook_calls_me()
+                     |
+                     |print("program")
+                     |""".stripMargin)
+
+      out should not include "only_the_hook_calls_me"
     }
   }
 

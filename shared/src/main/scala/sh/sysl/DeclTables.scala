@@ -207,6 +207,16 @@ trait DeclTables extends Reporting {
    */
   protected val tests = mutable.ListBuffer.empty[TTest]
 
+  /** The hooks the sources declared, in the order hoisting met them
+   * (`reference/attributes.md § The hooks a module may write`).
+   *
+   * Flat rather than grouped by module, because it is filled one declaration at a time and the
+   * grouping is what `ProgramWalk` does with it once every file has been read. A second hook of one
+   * kind in one module is refused against what is already here, which is also what makes the refusal
+   * able to name the first.
+   */
+  protected val hooks = mutable.ListBuffer.empty[THook]
+
   /** Everything declared in a file whose header said `@tests` (`reference/attributes.md § @tests — a file of scaffolding`), by the module-qualified
    * key every other table here uses.
    *

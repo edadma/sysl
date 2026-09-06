@@ -576,6 +576,15 @@ case class FuncDecl(
     /** Which of `tparams` stand for a **list** of types — `[..A: Display]` (`reference/generics.md § A parameter may stand for a list of types`). */
     tpacks: Set[String] = Set.empty,
     test: Option[TestAttr] = None,
+    /** `@setup`, `@teardown`, `@setup_all` or `@teardown_all` — the moment under `sysl test` at
+      * which this function is called (`reference/attributes.md § The hooks a module may write`).
+      *
+      * One field for the four because they are one role written four ways: a declaration either is
+      * a hook or is not, and which of the four moments it names is what `HookKind` carries. Two of
+      * them above one declaration is refused where `@test` beside one is — a function is called at
+      * one moment rather than at two.
+      */
+    hook: Option[HookAttr] = None,
     conv: Option[CallConv] = None,
     /** `@tailrec` — see `TFunc.tailrec`. */
     tailrec: Boolean = false,
@@ -644,12 +653,43 @@ case class ExportAttr(symbol: Option[String]) extends Positioned
  */
 case class TestAttr(display: Option[String], shouldTrap: Boolean, expected: Option[String]) extends Positioned
 
+/** Which of the four moments under `sysl test` a hook function is called at
+ * (`reference/attributes.md § The hooks a module may write`).
+ *
+ * The scope is the **module**: a module writes at most one of each, and what it writes runs for the
+ * `@test` functions that module declares. `word` is the spelling, which is both what the grammar
+ * reads and what a refusal names.
+ *
+ * `Setup` and `Teardown` bracket **each** test, `SetupAll` and `TeardownAll` bracket the module's
+ * whole run. The division is what a hook can share with a test: a per-test hook runs in the test's
+ * own process and so shares that process's module storage, and an `_all` hook is a run of its own
+ * and shares only what outlives a process.
+ */
+enum HookKind(val word: String) {
+  case Setup       extends HookKind("setup")
+  case Teardown    extends HookKind("teardown")
+  case SetupAll    extends HookKind("setup_all")
+  case TeardownAll extends HookKind("teardown_all")
+}
+
+/** `@setup` and its three siblings, as written. The position is carried for the reason `TestAttr`'s
+ * is: a hook that faulted has an exit status rather than a diagnostic, and this is the line a report
+ * can point at.
+ */
+case class HookAttr(kind: HookKind) extends Positioned
+
 /** One attribute written above a declaration, before it has been folded into the `FuncDecl` it
  * qualifies. It exists for the fold and for the refusal of a repeat — `word` is the spelling that
  * refusal names, and is what makes two attributes the same one.
  */
 enum Attr(val word: String) {
   case Test(attr: TestAttr) extends Attr("test")
+
+  /** `@setup`, `@teardown`, `@setup_all`, `@teardown_all` — one case for the four, taking its
+    * `word` from the kind so that each is its own spelling to the refusal of a repeat, and so that
+    * a fifth moment would be a `HookKind` case rather than a fifth attribute.
+    */
+  case Hook(attr: HookAttr) extends Attr(attr.kind.word)
   case TailRec              extends Attr("tailrec")
   case Pure                 extends Attr("pure")
   case Ghost                extends Attr("ghost")

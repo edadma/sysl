@@ -14,6 +14,10 @@ import scala.collection.mutable
  *   - a declaration in a `@tests` file may name another, since the two are dropped together;
  *   - a `@test` function may name one wherever it was written, because `reference/attributes.md § @tests — a file of scaffolding` puts a test
  *     beside what it tests and `Tests.strip` drops it in the same builds;
+ *   - a hook may name one for the same reason it is dropped by the same builds
+ *     (`reference/attributes.md § The hooks a module may write`) — a `@setup` exists to prepare what
+ *     the module's tests are written against, so the scaffolding they may name is the scaffolding it
+ *     may name;
  *   - anything else may not, and is told so where it wrote the name.
  *
  * **A closure is judged by the body it was written in, not by the name it was filed under.** It is
@@ -44,12 +48,12 @@ trait TestScope extends AnalyzerBase {
    * the mistake, and the one a reader is likeliest to make while moving code out of a test.
    */
   protected def checkTestScope(funcs: List[TFunc], main: List[TStmt], testOnly: Set[String],
-                               tests: Set[String]): Unit = {
+                               scaffolding: Set[String]): Unit = {
     if testOnly.isEmpty then return
 
     reported.clear()
 
-    for f <- funcs if !testOnly(f.name) && !tests(f.name) do
+    for f <- funcs if !testOnly(f.name) && !scaffolding(f.name) do
       scan(f.body, testOnly, None)
       f.requires.foreach((c, _) => scan(c, testOnly, None))
       f.ensures.foreach((c, _) => scan(c, testOnly, None))

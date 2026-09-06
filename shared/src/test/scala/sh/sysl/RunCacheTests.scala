@@ -317,4 +317,32 @@ class RunCacheTests extends AnyFreeSpec with Matchers {
       entries(cache) shouldBe 0
     }
   }
+
+  "the test sidecar carries a suite back exactly as it went in" - {
+    // The sidecar is how a cached suite reaches the runner: the binary alone says which tests exist,
+    // and nothing in it says what to call them or which hooks bracket them. A field that did not
+    // survive the round trip is a cached run behaving differently from a fresh one, which is the one
+    // thing a cache may never do.
+    val suite = List(
+      TTest("m$plain", "a test with no hooks around it", false, None, "m.sysl", 3),
+      TTest("m$traps", "one that should trap", true, Some("past the end"), "m.sysl", 9,
+            THooks(setup = Some(THook(HookKind.Setup, "m$up", "m.sysl", 12)),
+                   teardownAll = Some(THook(HookKind.TeardownAll, "m$halt", "m.sysl", 20)))),
+    )
+
+    "every field comes back" in {
+      RunCache.decode(RunCache.encode(suite)) shouldBe Some(suite)
+    }
+
+    "a test with no hooks comes back with none" in {
+      RunCache.decode(RunCache.encode(suite)).get.head.hooks shouldBe THooks()
+    }
+
+    // A sidecar written before the hooks existed has fewer fields per line, and the read is what has
+    // to notice: `None` is a rebuild, and a rebuild is the designed answer.
+    "a line of the wrong shape is no cache at all" in {
+      RunCache.decode(List("m$plain", "a test", "false", "", "0", "m.sysl", "3").mkString("\u0000")) shouldBe None
+    }
+  }
+
 }

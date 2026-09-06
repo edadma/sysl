@@ -109,7 +109,7 @@ object TestRunner {
         val outcomes = execute(exe, selected, opts)
 
         if keeping.isEmpty then Project.discard(exe)
-        stdout(rendered(outcomes, tests.length - selected.length))
+        stdout(rendered(outcomes, tests.length - selected.length, selected.length))
         if outcomes.forall(_.passed) then 0 else 1
   }
 
@@ -134,7 +134,7 @@ object TestRunner {
 
     val outcomes = execute(exe, selected, opts)
 
-    stdout(rendered(outcomes, tests.length - selected.length))
+    stdout(rendered(outcomes, tests.length - selected.length, selected.length))
     if outcomes.forall(_.passed) then 0 else 1
   }
 
@@ -149,17 +149,120 @@ object TestRunner {
     val done = List.newBuilder[Outcome]
     var stop = false
 
-    for t <- tests if !stop do
-      val started = System.currentTimeMillis()
-      val result  = exec(List(exe, t.func))
-      val output  = result.stdout + result.stderr
-      val outcome = Outcome(t, verdict(t, result.exitCode, output), output, System.currentTimeMillis() - started)
+    for (_, group) <- byModule(tests) if !stop do
+      val hooks = group.head.hooks
 
-      done += outcome
-      if opts.failFast && !outcome.passed then stop = true
+      // `@setup_all` is a run of its own, before anything else in the module. Where it does not come
+      // back it gets a row of its own and the module's tests do not run: there is no test to hang
+      // the failure on, and reporting tests that never started would be a third verdict for
+      // something that is not one — the same reading `failFast` above is given.
+      val booted = hooks.setupAll.map(h => h -> runHook(exe, h))
+
+      booted match
+        case Some((h, r)) if r.failed =>
+          done += hookOutcome(h, r)
+          if opts.failFast then stop = true
+        case _ =>
+          for t <- group if !stop do
+            val outcome = one(exe, t)
+
+            done += outcome
+            if opts.failFast && !outcome.passed then stop = true
+
+      // `@teardown_all` runs whatever became of the tests, and whatever became of `@setup_all`:
+      // what it is for is releasing what the module took, and a module that failed halfway has
+      // taken some of it.
+      for h <- hooks.teardownAll do
+        val r = runHook(exe, h)
+
+        if r.failed then
+          done += hookOutcome(h, r)
+          if opts.failFast then stop = true
 
     done.result()
   }
+
+  /** The selected tests grouped by the module that declared them, in the order the modules were
+   * first met.
+   *
+   * The grouping is what makes an `_all` hook run once, and the order is the tests' own so that a
+   * report still follows the source. A module with no hooks pays nothing for this: the group runs
+   * exactly the processes it would have run without one.
+   */
+  private def byModule(tests: List[TTest]): List[(String, List[TTest])] = {
+    val groups = tests.groupBy(t => Modules.moduleOf(t.func))
+
+    tests.map(t => Modules.moduleOf(t.func)).distinct.map(m => m -> groups(m))
+  }
+
+  /** One test, run — and its module's per-test hooks around it.
+   *
+   * **`@setup` runs inside the test's process** (`Codegen.genTestMain`), so what it leaves in module
+   * storage is what the test finds. That is also why a fault in it cannot be told from a fault in
+   * the test by the exit status alone, and why the dispatcher leaves a mark on its way past
+   * (`Tests.setupMark`): no mark means the run never got out of setup.
+   *
+   * **`@teardown` runs in that process where the test returned, and in one of its own where it did
+   * not.** A trap takes the process with it, so there is nothing left there to run a teardown in —
+   * and honouring "teardown runs even when the test failed" any other way would mean not running it
+   * at all. What a fresh process can release is what outlives a process, which is what the hook is
+   * documented to be for.
+   */
+  private def one(exe: String, t: TTest): Outcome = {
+    val started = System.currentTimeMillis()
+    val result  = exec(List(exe, t.func))
+    val raw     = result.stdout + result.stderr
+    val output  = Tests.unmarked(raw)
+
+    val setupRan    = t.hooks.setup.isEmpty || raw.exists(_ == Tests.setupMark)
+    val enteredDown = t.hooks.teardown.isDefined && raw.exists(_ == Tests.testMark)
+
+    val inProcess =
+      if !setupRan then t.hooks.setup.map(h => guarded(h, result.exitCode))
+      else if enteredDown && result.exitCode != 0 then
+        t.hooks.teardown.map(h => hookFailed(h, result.exitCode) + ", after the test returned")
+      else verdict(t, result.exitCode, output)
+
+    // The teardown the process could not reach. Its own output joins the test's, since a reader
+    // following one failure should not have to run the suite again to see the other.
+    val after = for h <- t.hooks.teardown if !enteredDown yield h -> runHook(exe, h)
+
+    Outcome(
+      t,
+      inProcess.orElse(after.collect { case (h, r) if r.failed => hookFailed(h, r.status) }),
+      output + after.map(_._2.output).getOrElse(""),
+      System.currentTimeMillis() - started,
+    )
+  }
+
+  /** What one hook's own process did. */
+  private case class HookRun(status: Int, output: String, millis: Long) {
+    def failed: Boolean = status != 0
+  }
+
+  private def runHook(exe: String, h: THook): HookRun = {
+    val started = System.currentTimeMillis()
+    val result  = exec(List(exe, h.func))
+
+    HookRun(result.exitCode, Tests.unmarked(result.stdout + result.stderr),
+            System.currentTimeMillis() - started)
+  }
+
+  /** A hook's failure as a report row, since a hook that runs alone has no test to hang one on.
+   *
+   * It borrows `TTest` rather than growing the report a second kind of row: what a row needs is a
+   * name, a file and a line, and a hook has all three. It is shown under the name it was declared
+   * with, which is what a reader greps for.
+   */
+  private def hookOutcome(h: THook, r: HookRun): Outcome =
+    Outcome(TTest(h.func, Modules.bare(h.func), false, None, h.file, h.line), Some(hookFailed(h, r.status)),
+            r.output, r.millis)
+
+  private def hookFailed(h: THook, status: Int): String =
+    s"the module's '@${h.kind.word}', '${Modules.show(h.func)}', did not return — exit status $status"
+
+  private def guarded(h: THook, status: Int): String =
+    s"${hookFailed(h, status)}, so this test did not run"
 
   /** Whether a test's run was what the test said it would be, and if not, what it was instead.
    *
@@ -193,14 +296,18 @@ object TestRunner {
    * indented, and is shown **only** for a failure — output from a test that passed is what the test
    * was doing, not something anyone asked to read.
    */
-  def rendered(outcomes: List[Outcome], filtered: Int): String = {
+  def rendered(outcomes: List[Outcome], filtered: Int, selected: Int): String = {
     val out    = new StringBuilder
     val failed = outcomes.count(!_.passed)
     val total  = outcomes.map(_.millis).sum
     val width  = if outcomes.isEmpty then 0 else outcomes.map(_.test.display.length).max
 
-    out ++= s"running ${outcomes.length} ${if outcomes.length == 1 then "test" else "tests"}"
-    if filtered > 0 then out ++= s" of ${outcomes.length + filtered}"
+    // The header counts the **tests** that were selected, which is not the number of rows below it:
+    // a hook that did not come back gets a row of its own, and a module whose `@setup_all` failed
+    // has tests that were selected and never ran. Reading the count off the rows would say "running
+    // 4 tests" over three tests and a hook.
+    out ++= s"running $selected ${if selected == 1 then "test" else "tests"}"
+    if filtered > 0 then out ++= s" of ${selected + filtered}"
     out ++= "\n"
 
     for (file, group) <- outcomes.groupBy(_.test.file).toList.sortBy(_._1) do

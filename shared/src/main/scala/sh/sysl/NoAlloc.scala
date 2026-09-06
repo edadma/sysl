@@ -94,8 +94,8 @@ trait NoAlloc extends AnalyzerBase {
       testFuncs: Set[String],
   ): Unit = {
     // Everything a test build keeps and every other build drops. `testOnlyDecls` is the `@tests`
-    // files' declarations and the closures lowered inside any test body; the `@test` functions
-    // themselves are named nowhere else, and are what the second half adds.
+    // files' declarations and the closures lowered inside any test body; the `@test` functions and
+    // the hooks around them are named nowhere else, and are what the second half adds.
     val scaffolding = testOnlyDecls.toSet ++ testFuncs
 
     // Lazily, because building it walks every body in the program: a compilation with no clause

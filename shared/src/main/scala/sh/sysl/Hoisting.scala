@@ -393,6 +393,21 @@ trait Hoisting extends HoistMembers {
           tests += Tests.describe(key, a)
         }
 
+      // A hook is registered exactly as a test is, and held to the same signature rules for the same
+      // reason: the runner calls it with nothing and reads the answer off whether it came back. What
+      // is checked here and nowhere else is that its module has only one of its kind — a question
+      // about the module rather than about the declaration, so this is the first place it can be
+      // asked (`Tests.duplicateHook`).
+      for h <- f.hook do
+        at(h.pos) {
+          Tests.problem(f, h.kind.word).foreach(err)
+          funcInsts.get(key).map(_._2).flatMap(Tests.resultProblem(f, _, h.kind.word)).foreach(err)
+
+          hooks.find(x => x.kind == h.kind && Modules.moduleOf(x.func) == currentModule) match
+            case Some(first) => err(Tests.duplicateHook(h.kind, currentModule, first, key))
+            case None        => hooks += Tests.describeHook(key, h)
+        }
+
     // An `extern`'s **symbol** is not qualified, and cannot be: it names something the linker
     // already has, which knows nothing about sysl's modules. So the key the program calls it by
     // carries the module like any other name, and the symbol is pinned to what was written.

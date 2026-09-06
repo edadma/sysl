@@ -212,4 +212,59 @@ class TestCliTests extends AnyFreeSpec with Matchers {
       out should include("passed")
     }
   }
+
+  "the hooks a module writes reach the command a user runs" - {
+    "a suite whose hooks all return leaves the status a passing suite leaves" in {
+      assume(Toolchain.clangAvailable, "clang not available")
+
+      val (status, out, _) = ran(Config(command = "test", file = program(
+        """@setup_all
+          |boot() =
+          |    print("up")
+          |
+          |@setup
+          |s() =
+          |    print("before")
+          |
+          |@test
+          |t() =
+          |    assert(1 + 1 == 2, "arithmetic")
+          |
+          |@teardown
+          |d() =
+          |    print("after")
+          |
+          |@teardown_all
+          |halt() =
+          |    print("down")
+          |""".stripMargin)))
+
+      status shouldBe 0
+      out should include("running 1 test")
+      out should include("1 passed, 0 failed")
+    }
+
+    // The seam a user meets when a hook is what broke: the row names the hook rather than a test,
+    // the status is a failure, and the count above still says how many tests were selected.
+    "a hook that does not return is a failure the command reports and exits on" in {
+      assume(Toolchain.clangAvailable, "clang not available")
+
+      val (status, out, _) = ran(Config(command = "test", file = program(
+        """@test
+          |t() =
+          |    print("the test was fine")
+          |
+          |@teardown_all
+          |halt() =
+          |    assert(false, "the module's teardown broke")
+          |""".stripMargin)))
+
+      status shouldBe 1
+      out should include("running 1 test")
+      out should include("halt")
+      out should include("'@teardown_all'")
+      out should include("1 passed, 1 failed")
+    }
+  }
+
 }

@@ -15,10 +15,18 @@ import org.scalatest.matchers.should.Matchers
 trait TestFrameworkSupport extends Matchers { this: Assertions =>
 
   /** Every test in a source, run, in the order the source declared them. */
-  protected def outcomes(src: String, opts: TestRunner.Options = TestRunner.Options()): List[TestRunner.Outcome] = {
+  protected def outcomes(src: String, opts: TestRunner.Options = TestRunner.Options()): List[TestRunner.Outcome] =
+    outcomesOf(List(Source("<input>", src)), opts)
+
+  /** The same, over several files — which is how a claim about a **module** is asserted, since a
+   * module is what a file's header says it contributes to. The hooks are scoped per module, so
+   * every question about that scope needs at least two of them.
+   */
+  protected def outcomesOf(sources: List[Source],
+                           opts: TestRunner.Options = TestRunner.Options()): List[TestRunner.Outcome] = {
     assume(Toolchain.clangAvailable, "clang not available")
 
-    val (built, tests) = Compiler.compileTests(List(Source("<input>", src)), Nil) match {
+    val (built, tests) = Compiler.compileTests(sources, Nil) match {
       case Right(result) => result
       case Left(e)       => fail(e)
     }

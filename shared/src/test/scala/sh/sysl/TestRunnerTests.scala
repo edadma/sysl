@@ -11,6 +11,286 @@ import org.scalatest.freespec.AnyFreeSpec
  */
 class TestRunnerTests extends AnyFreeSpec with CodegenSupport with TestFrameworkSupport {
 
+
+  "the hooks a module writes around its tests" - {
+    // The claim `@setup` exists for: it runs in the test's **own** process, so what it leaves in
+    // module storage is what the test finds. Counting rather than flagging, so that a setup running
+    // twice in one process fails as loudly as one that did not run at all.
+    "'@setup' runs once in each test's process, and the test sees what it left" in {
+      allPass("""module m
+                |
+                |var ran: int = 0
+                |
+                |@setup
+                |s() =
+                |    ran = ran + 1
+                |
+                |@test
+                |one() =
+                |    assert(ran == 1, "setup ran exactly once before this test")
+                |
+                |@test
+                |two() =
+                |    assert(ran == 1, "and once before this one, in a process of its own")
+                |""".stripMargin)
+    }
+
+    "'@teardown' runs in the test's process where the test returned" in {
+      allPass("""module m
+                |
+                |var ran: int = 0
+                |
+                |@setup
+                |s() =
+                |    ran = 1
+                |
+                |@test
+                |t() =
+                |    ran = 2
+                |
+                |@teardown
+                |d() =
+                |    assert(ran == 2, "teardown sees what the test left")
+                |""".stripMargin)
+    }
+
+    // The other half of the same rule, and the one a reader has to be told: a trap takes the process
+    // with it, so there is nothing left to run a teardown in. It runs in a process of its own, which
+    // sees module storage as the initializers left it — so what it can release there is what
+    // outlives a process.
+    "'@teardown' runs in a process of its own where the test did not return" in {
+      allPass("""module m
+                |
+                |var ran: int = 0
+                |
+                |@setup
+                |s() =
+                |    ran = 1
+                |
+                |@test(should_trap)
+                |t() =
+                |    assert(ran == 1, "setup ran")
+                |    assert(false, "and now the process ends")
+                |
+                |@teardown
+                |d() =
+                |    assert(ran == 0, "a fresh process sees the initializers and nothing else")
+                |""".stripMargin)
+    }
+
+    "a '@setup' that does not return fails the tests it guards, and names itself" in {
+      val ran = outcomes("""@setup
+                           |s() =
+                           |    assert(false, "the setup broke")
+                           |
+                           |@test
+                           |t() =
+                           |    print("never reached")
+                           |""".stripMargin)
+
+      ran.map(_.test.display) shouldBe List("t")
+      ran.head.detail.get should include("'@setup'")
+      ran.head.detail.get should include("s")
+      ran.head.detail.get should include("so this test did not run")
+    }
+
+    // A setup fault and a test fault leave the same exit status, since both end the same process.
+    // Telling them apart is the whole of what the dispatcher's marks buy, and this is the pair that
+    // says the reading is right rather than lucky.
+    "a test that fails under a '@setup' that worked is still reported as the test failing" in {
+      val ran = outcomes("""module m
+                           |
+                           |var ran: int = 0
+                           |
+                           |@setup
+                           |s() =
+                           |    ran = 1
+                           |
+                           |@test
+                           |t() =
+                           |    assert(ran == 2, "the test's own check")
+                           |""".stripMargin)
+
+      ran.head.detail.get should startWith("did not return")
+    }
+
+    "a '@teardown' that does not return is a failure counted against the test" in {
+      val ran = outcomes("""@test
+                           |t() =
+                           |    print("the test itself was fine")
+                           |
+                           |@teardown
+                           |d() =
+                           |    assert(false, "the teardown broke")
+                           |""".stripMargin)
+
+      ran.head.passed shouldBe false
+      ran.head.detail.get should include("'@teardown'")
+      ran.head.detail.get should include("after the test returned")
+    }
+
+    "a '@teardown' in its own process is a failure counted the same way" in {
+      val ran = outcomes("""@test(should_trap)
+                           |t() =
+                           |    assert(false, "the test was meant to trap")
+                           |
+                           |@teardown
+                           |d() =
+                           |    assert(false, "and the teardown broke")
+                           |""".stripMargin)
+
+      ran.head.passed shouldBe false
+      ran.head.detail.get should include("'@teardown'")
+    }
+
+    // Three tests and one row for the hook is the whole of "once per module": run per test it would
+    // have been three.
+    "'@teardown_all' runs once for the module, whatever the tests did" in {
+      val ran = outcomes("""@test
+                           |one() = 0
+                           |
+                           |@test
+                           |two() = 0
+                           |
+                           |@test
+                           |three() = 0
+                           |
+                           |@teardown_all
+                           |halt() =
+                           |    assert(false, "the module's teardown broke")
+                           |""".stripMargin)
+
+      ran.count(_.passed) shouldBe 3
+      ran.filterNot(_.passed).map(_.test.display) shouldBe List("halt")
+      ran.last.detail.get should include("'@teardown_all'")
+    }
+
+    // A `_all` hook has no test to hang a failure on, and the tests it was going to guard never
+    // started — reporting them would be a third verdict for something that is not one.
+    "a '@setup_all' that does not return stops the module and gets a row of its own" in {
+      val ran = outcomes("""@setup_all
+                           |boot() =
+                           |    assert(false, "the module never came up")
+                           |
+                           |@test
+                           |one() = 0
+                           |
+                           |@test
+                           |two() = 0
+                           |""".stripMargin)
+
+      ran.map(_.test.display) shouldBe List("boot")
+      ran.head.passed shouldBe false
+      ran.head.detail.get should include("'@setup_all'")
+    }
+
+    "'@teardown_all' still runs where '@setup_all' did not come back" in {
+      val ran = outcomes("""@setup_all
+                           |boot() =
+                           |    assert(false, "up failed")
+                           |
+                           |@teardown_all
+                           |halt() =
+                           |    assert(false, "and down is asked all the same")
+                           |
+                           |@test
+                           |t() = 0
+                           |""".stripMargin)
+
+      ran.map(_.test.display) shouldBe List("boot", "halt")
+    }
+
+    // An `_all` hook is a process of its own, so what it leaves in module storage is gone before the
+    // first test starts. The docs say so plainly, and this is the program that says it back.
+    "an '_all' hook shares nothing with a test through module storage" in {
+      allPass("""module m
+                |
+                |var ran: int = 0
+                |
+                |@setup_all
+                |boot() =
+                |    ran = 1
+                |
+                |@test
+                |t() =
+                |    assert(ran == 0, "a test's process is not the one '@setup_all' ran in")
+                |""".stripMargin)
+    }
+
+    // The marks are the runner's channel, and a reader must never meet one: a failure shows what the
+    // run printed, and a control character in the middle of it is the framework leaking.
+    "the phase marks never reach the output a failure shows" in {
+      val ran = outcomes("""@setup
+                           |s() =
+                           |    print("from the setup")
+                           |
+                           |@teardown
+                           |d() =
+                           |    print("from the teardown")
+                           |
+                           |@test
+                           |t() =
+                           |    print("from the test")
+                           |    assert(false, "and now it fails")
+                           |""".stripMargin)
+
+      ran.head.output should include("from the setup")
+      ran.head.output should include("from the test")
+      ran.head.output.exists(c => c == Tests.setupMark || c == Tests.testMark) shouldBe false
+    }
+
+    "a module with no hooks runs exactly the processes it always ran" in {
+      allPass("""@test
+                |t() =
+                |    assert(1 + 1 == 2, "arithmetic")
+                |""".stripMargin)
+    }
+
+    "each module's tests get their own module's hooks" in {
+      val ran = outcomesOf(files(
+        "a.sysl" -> """module a
+                      |
+                      |var ran: int = 0
+                      |
+                      |@setup
+                      |s() =
+                      |    ran = 1
+                      |
+                      |@test
+                      |mine() =
+                      |    assert(ran == 1, "a's setup ran for a's test")
+                      |""".stripMargin,
+        "b.sysl" -> """module b
+                      |
+                      |var ran: int = 0
+                      |
+                      |@test
+                      |theirs() =
+                      |    assert(ran == 0, "and nothing ran for b's")
+                      |""".stripMargin))
+
+      ran.filterNot(_.passed) shouldBe empty
+      ran.map(_.test.display) should contain theSameElementsAs List("mine", "theirs")
+    }
+  }
+
+  "the report counts the tests that were selected, not the rows it printed" - {
+    // A hook row is a row and is not a test, so reading the header off the rows would say "running 2
+    // tests" over one test and one hook.
+    "a hook failure adds a row without adding to the count" in {
+      val ran = outcomes("""@test
+                           |t() = 0
+                           |
+                           |@teardown_all
+                           |halt() =
+                           |    assert(false, "broke")
+                           |""".stripMargin)
+
+      TestRunner.rendered(ran, 0, 1) should include("running 1 test\n")
+      TestRunner.rendered(ran, 0, 1) should include("1 passed, 1 failed")
+    }
+  }
+
   "a test passes by returning and fails by not" - {
     "a test that returns passes" in {
       verdicts("""@test
@@ -222,27 +502,28 @@ class TestRunnerTests extends AnyFreeSpec with CodegenSupport with TestFramework
 
   "the report says what happened" - {
     "it counts what ran and what failed" in {
-      val text = TestRunner.rendered(ran, 0)
+      val text = TestRunner.rendered(ran, 0, ran.length)
 
       text should include("running 2 tests")
       text should include("1 passed, 1 failed")
     }
 
     "a failure carries the line the attribute is on" in {
-      TestRunner.rendered(ran, 0) should include("at m.sysl:7")
+      TestRunner.rendered(ran, 0, ran.length) should include("at m.sysl:7")
     }
 
     // Output from a passing test is what the test was doing; output from a failing one is evidence.
     "what a failing test printed is shown, and what a passing one printed is not" in {
       val text = TestRunner.rendered(
-        ran :+ TestRunner.Outcome(TTest("c", "quiet", false, None, "m.sysl", 9), None, "unread\n", 1), 0)
+        ran :+ TestRunner.Outcome(TTest("c", "quiet", false, None, "m.sysl", 9), None, "unread\n", 1),
+        0, ran.length + 1)
 
       text should include("> panic: nope")
       text should not include "unread"
     }
 
     "a filtered run says how many it did not run" in {
-      TestRunner.rendered(ran, 5) should include("running 2 tests of 7")
+      TestRunner.rendered(ran, 5, ran.length) should include("running 2 tests of 7")
     }
 
     "tests are shown under the file they were written in, in source order" in {
@@ -251,7 +532,7 @@ class TestRunnerTests extends AnyFreeSpec with CodegenSupport with TestFramework
         TestRunner.Outcome(TTest("a", "first", false, None, "m.sysl", 10), None, "", 1),
       )
 
-      val lines = TestRunner.rendered(mixed, 0).linesIterator.filter(_.contains("ok")).toList
+      val lines = TestRunner.rendered(mixed, 0, mixed.length).linesIterator.filter(_.contains("ok")).toList
 
       lines.head should include("first")
       lines(1) should include("second")

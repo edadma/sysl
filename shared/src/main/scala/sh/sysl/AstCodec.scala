@@ -69,7 +69,7 @@ object AstCodec {
    * conflict**, and that is the case the rule above is written for: read dev's number, take the one
    * after it, and do not assume a clean merge means the versions agree.
    */
-  val Version: Int = 53
+  val Version: Int = 54
 
   private val Magic = "sysl-ast"
 
@@ -206,6 +206,13 @@ object AstCodec {
     // rather than here. What this is for is the codec's own promise: a tree reads back as the tree
     // that was written, and a field left out silently is how that stops being true.
     private def testAttr(a: TestAttr): Unit = { pos(a); opt(a.display)(sref); bool(a.shouldTrap); opt(a.expected)(sref) }
+
+    /** A hook attribute travels as its `HookKind`'s spelling, which is the word the grammar reads
+      * and the one a refusal names — so an artifact and a source say the same thing about the same
+      * declaration. It reaches an artifact only where something kept a hook past `Tests.stripSource`,
+      * and the round trip is what says the two paths agree.
+      */
+    private def hookAttr(a: HookAttr): Unit = { pos(a); tok(a.kind.word) }
 
     private def asmArm(a: AsmArm): Unit = {
       pos(a); list(a.archs)(sref)
@@ -418,11 +425,11 @@ object AstCodec {
         case Invariant(c, m)              => tok("inv"); expr(c); opt(m)(sref)
         case Variant(e)                   => tok("vnt"); expr(e)
 
-        case FuncDecl(n, tps, ps, rt, b, bs, va, vs, tds, tvs, tpk, t, cv, tr, pu, gh, rd, wr, ex, sc,
+        case FuncDecl(n, tps, ps, rt, b, bs, va, vs, tds, tvs, tpk, t, hk, cv, tr, pu, gh, rd, wr, ex, sc,
                       cr, nd) =>
           tok("fn"); sref(n); list(tps)(sref); list(ps)(param); opt(rt)(typ); list(b)(stmt)
           bounds(bs); bool(va); vis(vs); tdefaults(tds); tdefaults(tvs); list(tpk.toList)(sref)
-          opt(t)(testAttr)
+          opt(t)(testAttr); opt(hk)(hookAttr)
           opt(cv)(c => { pos(c); sref(c.name); opt(c.arg)(sref) }); bool(tr); bool(pu); bool(gh)
           // A frame is carried as written rather than as resolved: an archive holds declarations, and
           // the names are resolved against the importing program's view exactly as the body's are.
@@ -703,6 +710,13 @@ object AstCodec {
 
     private def testAttr(): TestAttr = at(TestAttr(opt(sref()), bool(), opt(sref())))
 
+    private def hookAttr(): HookAttr = at {
+      val word = tok()
+
+      HookAttr(HookKind.values.find(_.word == word)
+        .getOrElse(fail(s"'$word' is not one of the hooks a module may write")))
+    }
+
     private def asmArm(): AsmArm = at {
       val archs = list(sref())
 
@@ -865,6 +879,7 @@ object AstCodec {
         case "fn" =>
           FuncDecl(sref(), list(sref()), list(param()), opt(typ()), list(stmt()),
             bounds(), bool(), vis(), tdefaults(), tdefaults(), list(sref()).toSet, opt(testAttr()),
+            opt(hookAttr()),
             opt(at(CallConv(sref(), opt(sref())))), bool(), bool(), bool(),
             opt(list(sref())), opt(list(sref())), opt(at(ExportAttr(opt(sref())))), opt(sref()),
             list(sref()), list(sref()))

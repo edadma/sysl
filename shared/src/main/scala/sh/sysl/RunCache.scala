@@ -189,18 +189,38 @@ object RunCache {
   def tests(key: String): Option[String] = slot(key).map(_ + ".tests")
 
   def encode(ts: List[TTest]): String =
-    ts.map(t => List(t.func, t.display, t.shouldTrap.toString, t.expected.getOrElse(""),
-                     if t.expected.isDefined then "1" else "0", t.file, t.line.toString)
+    ts.map(t => (List(t.func, t.display, t.shouldTrap.toString, t.expected.getOrElse(""),
+                      if t.expected.isDefined then "1" else "0", t.file, t.line.toString) :::
+                 HookKind.values.toList.flatMap(k => hookFields(t.hooks, k)))
              .mkString("\u0000")).mkString("\n")
+
+  /** One hook as three fields, empty where the module declared none. Three flat fields rather than
+   * one packed one, because the separator is already spoken for and a second one would be a second
+   * character a name must not hold.
+   */
+  private def hookFields(hooks: THooks, kind: HookKind): List[String] =
+    hooks.all.find(_.kind == kind) match
+      case Some(h) => List(h.func, h.file, h.line.toString)
+      case None    => List("", "", "")
 
   def decode(text: String): Option[List[TTest]] =
     val lines = text.linesIterator.filter(_.nonEmpty).toList
+    val marks = 6 + HookKind.values.length * 3
 
-    Option.when(lines.forall(_.count(_ == '\u0000') == 6))(
+    Option.when(lines.forall(_.count(_ == '\u0000') == marks))(
       lines.map { line =>
-        val f = line.split('\u0000')
+        // `-1` so that a trailing run of empty fields survives, which is every test in a module that
+        // declared no hooks at all. Without it the fields simply are not there and the read fails,
+        // which reads as a corrupt sidecar and is an ordinary suite.
+        val f = line.split("\u0000", -1)
+        val hooks = HookKind.values.toList.zipWithIndex.flatMap { (k, i) =>
+          val at = 7 + i * 3
 
-        TTest(f(0), f(1), f(2) == "true", Option.when(f(4) == "1")(f(3)), f(5), f(6).toInt)
+          Option.when(f(at).nonEmpty)(THook(k, f(at), f(at + 1), f(at + 2).toInt))
+        }
+
+        TTest(f(0), f(1), f(2) == "true", Option.when(f(4) == "1")(f(3)), f(5), f(6).toInt,
+              THooks.of(hooks))
       },
     )
 

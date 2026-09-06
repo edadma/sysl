@@ -456,17 +456,25 @@ trait ProgramWalk extends OpaqueResults with DropReturnCheck {
     // the same reason the module graph is held to being acyclic here rather than earlier.
     val allFuncs = (tfuncs ++ closureFuncs).toList
 
+    // Only the hooks whose bodies survived analysis, for the reason the same filter is applied to
+    // the tests below: a declaration that was reported is not one the dispatcher can lay an arm
+    // down for. Everything that asks "is this test scaffolding?" is asked of the two together —
+    // a hook is dropped by the same builds, may name what a `@tests` file declares, and is held to
+    // its module's test-side capability clause exactly as a test is.
+    val liveHooks   = hooks.filter(h => allFuncs.exists(_.name == h.func)).toList
+    val scaffolding = (tests.map(_.func) ++ liveHooks.map(_.func)).toSet
+
     // Asked of the finished tree, because what allocates is a node rather than a place in the
     // analyzer — and asked here rather than after `analyze` returns, so that a module doing what it
     // declared it would not is one of this walk's diagnostics like any other.
     checkNoAlloc(allFuncs, abstractFuncs.toList, tvals.toList, vtables.values.toList, tmain, mainScope.module,
-      tests.map(_.func).toSet)
+      scaffolding)
 
     // And what a declaration that wrote `@needs(...)` costs whoever reaches it — the same question
     // one granularity down, asked of the same tree (`reference/modules.md § A declaration may name
     // what reaching it needs`).
     checkDeclCapabilities(allFuncs, tvals.toList, vtables.values.toList, tmain, mainScope.module,
-      tests.map(_.func).toSet)
+      scaffolding)
 
     // And what a `@pure` function promised, asked of the same tree for the same reason
     // (`reference/verification.md § @pure`).
@@ -484,7 +492,7 @@ trait ProgramWalk extends OpaqueResults with DropReturnCheck {
 
     // And who may name what a `@tests` file declared (`reference/attributes.md § @tests — a file of scaffolding`), which is the rule that makes
     // dropping one sound in the same way.
-    checkTestScope(allFuncs, tmain, testOnlyDecls.toSet, tests.map(_.func).toSet)
+    checkTestScope(allFuncs, tmain, testOnlyDecls.toSet, scaffolding)
 
     // A closure lowered while a **generic body** was analyzed carries that body's type parameters in
     // its own signature, and no value at run time has such a type. It is the same case as the struct
@@ -510,6 +518,11 @@ trait ProgramWalk extends OpaqueResults with DropReturnCheck {
     // Ord](xs) = sort_by(xs, (a, b) -> a < b)` is the shape that found it, and `reference/types.md
     // § Function types` names a comparator passed to a sort as the bare arrow's motivating case —
     // so this is a shape the language invites.
+    // Every test is handed its own module's hooks, which is what lets the runner work from a list of
+    // tests alone — a cached suite arrives from a sidecar with no program behind it at all.
+    val hooksByModule = liveHooks.groupBy(h => Modules.moduleOf(h.func))
+      .view.mapValues(THooks.of).toMap.withDefaultValue(THooks())
+
     val emitted = allFuncs.filterNot(f =>
       f.params.exists((_, t) => Type.mentionsAbstract(t)) || Type.mentionsAbstract(f.retTy))
 
@@ -533,7 +546,9 @@ trait ProgramWalk extends OpaqueResults with DropReturnCheck {
       // Only the tests whose bodies survived analysis. A test whose body was reported is not a test
       // the runner could run, and listing it would put a name in the report that no dispatcher arm
       // matches — which reads as a test that vanished rather than as the error already printed.
-      tests = tests.filter(t => allFuncs.exists(_.name == t.func)).toList,
+      tests = tests.filter(t => allFuncs.exists(_.name == t.func))
+        .map(t => t.copy(hooks = hooksByModule(Modules.moduleOf(t.func)))).toList,
+      hooks = liveHooks,
       externVars = externVarsUsed.toList.map(k => TExternVar(externVarDecls(k).symbol, externVarType(k))),
       // Everything a `@tests` file declared, whether or not analysis kept it — unlike the tests
       // above, this is asked of a *tree that is about to be dropped*, so a name that reached no

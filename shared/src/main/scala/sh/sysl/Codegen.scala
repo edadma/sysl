@@ -77,7 +77,7 @@ class Codegen private (protected val program: TProgram, promotions: Escape.Promo
     // linked against it, which the linker reports as a duplicate symbol and nothing else explains.
     val entry =
       if !program.entryPoint then None
-      else if program.tests.nonEmpty then Some(genTestMain(program.vals, program.tests))
+      else if program.tests.nonEmpty then Some(genTestMain(program.vals, program.tests, program.hooks))
       else Some(genMain(program.vals, program.main, program.entry))
     // What a C archive gets instead of an entry point: a constructor the platform runs before the C
     // project's own `main`, filling the storage `@main` would have filled (`genModuleInit`). A
@@ -185,7 +185,8 @@ class Codegen private (protected val program: TProgram, promotions: Escape.Promo
     val declared = mutable.Set(Llvm.trap.name) ++ defined ++
       (if heap then Set(mallocSym, freeSym) else Set.empty) ++
       (if usesSnprintf then Set("snprintf") else Set.empty) ++
-      (if program.entryPoint && program.tests.nonEmpty then Set("strcmp") else Set.empty)
+      (if program.entryPoint && program.tests.nonEmpty then Set("strcmp") else Set.empty) ++
+      (if dispatcherMarks(program) then Set("write") else Set.empty)
 
     // An aggregate does not cross to a foreign callee as itself: the convention the other side was
     // compiled against says which registers it arrives in, so that is what the declaration names
@@ -231,6 +232,14 @@ class Codegen private (protected val program: TProgram, promotions: Escape.Promo
    * the **name** as well as the signature — so all of these are the machine's word rather than
    * eight bytes, and naming the wrong overload is a call to a function that does not exist.
    */
+  /** Whether this build's dispatcher writes a phase mark, which is what decides whether `write` is
+   * declared. Only a per-test hook makes it say anything: an `_all` hook is a process of its own and
+   * its verdict is that process's own exit status.
+   */
+  private def dispatcherMarks(program: TProgram): Boolean =
+    program.entryPoint && program.tests.nonEmpty &&
+      program.tests.exists(t => t.hooks.setup.isDefined || t.hooks.teardown.isDefined)
+
   private def intrinsics: List[ir.FuncSig] = {
     def sig(name: String, ret: LType, params: LType*) =
       ir.FuncSig(name, ir.FnType(ret, params.map(ir.Param(_)).toList))
@@ -254,6 +263,10 @@ class Codegen private (protected val program: TProgram, promotions: Escape.Promo
       // while emitting, because the entry point is emitted after this runs.
       Option.when(program.entryPoint && program.tests.nonEmpty)(
         sig("strcmp", i32, LType.Ptr, LType.Ptr)),
+      // What the dispatcher tells the runner with, and only where there is a hook for it to say
+      // anything about (`Tests.setupMark`). It is the same primitive the library prints with, at the
+      // signature `sysl.sys` already binds it at.
+      Option.when(dispatcherMarks(program))(sig("write", wordLty, i32, LType.Ptr, wordLty)),
       if usesVarargs then
         List(sig(Llvm.vaStart.at(LType.Ptr), LType.Void, LType.Ptr),
              sig(Llvm.vaEnd.at(LType.Ptr), LType.Void, LType.Ptr))
@@ -422,8 +435,14 @@ class Codegen private (protected val program: TProgram, promotions: Escape.Promo
    * The computed `val`s are laid down first, exactly as an ordinary entry point lays them down. A
    * test reads a module's storage the same way any other function does, and skipping the
    * initialization here would leave it reading zeros.
+   *
+   * **A hook gets an arm of its own as well as a place in the arms of the tests it brackets**
+   * (`reference/attributes.md § The hooks a module may write`). The two are different requests: the
+   * runner asks for `setup_all` by name and gets a process that runs it and nothing else, and it
+   * asks for a test by name and gets `setup(); test(); teardown()` in one process, because a setup
+   * that ran somewhere else would leave the test's own module storage untouched.
    */
-  private def genTestMain(vals: List[TVal], tests: List[TTest]): ir.Func = {
+  private def genTestMain(vals: List[TVal], tests: List[TTest], hooks: List[THook]): ir.Func = {
     startFunction()
     promoted = promotions(None)
     pushTemps()
@@ -460,7 +479,41 @@ class Codegen private (protected val program: TProgram, promotions: Escape.Promo
 
       emitTerm(Inst.CondBr(hit, run, next))
       emitLabel(run)
+
+      // The test's own process is where its module's `@setup` runs, and it has to be: a setup exists
+      // to leave something behind for the test to find, and module storage is one process's.
+      for h <- t.hooks.setup do
+        emit(Inst.Call(None, LType.Void, Val.Global(symbolOf(h.func)), Nil))
+        emitMark(Tests.setupMark)
+
       emit(Inst.Call(None, LType.Void, Val.Global(symbolOf(t.func)), Nil))
+
+      // `@teardown` runs here only where the test **returned**, which is the whole of what the mark
+      // records. A test that trapped took this process with it, so the runner starts a fresh one for
+      // the teardown instead and what it can release there is what outlives a process.
+      for h <- t.hooks.teardown do
+        emitMark(Tests.testMark)
+        emit(Inst.Call(None, LType.Void, Val.Global(symbolOf(h.func)), Nil))
+
+      emitTerm(Inst.Ret(Some(i32), Some(Val.Int(0))))
+      emitLabel(next)
+
+    // An arm per hook as well, so that the runner can ask for one by name: the two `_all` hooks are
+    // invocations of their own, and so is a `@teardown` after a test that did not come back. Keys
+    // are distinct, so an arm for a hook cannot be reached by a test's name or the other way round.
+    for h <- hooks do
+      val run  = freshLabel("hook.run")
+      val next = freshLabel("hook.next")
+      val cmp  = freshReg()
+
+      emit(Inst.Call(Some(cmp), i32, Val.Global("strcmp"),
+        List(Arg(LType.Ptr, want), Arg(LType.Ptr, stringGlobal(h.func + "\u0000")))))
+
+      val hit  = freshReg(); emit(Inst.IntCmp(hit, ICmp.Eq, i32, cmp, Val.Int(0)))
+
+      emitTerm(Inst.CondBr(hit, run, next))
+      emitLabel(run)
+      emit(Inst.Call(None, LType.Void, Val.Global(symbolOf(h.func)), Nil))
       emitTerm(Inst.Ret(Some(i32), Some(Val.Int(0))))
       emitLabel(next)
 
@@ -473,6 +526,18 @@ class Codegen private (protected val program: TProgram, promotions: Escape.Promo
 
     finishFunc(entrySig)
   }
+
+  /** One byte to standard error, saying how far the dispatcher has got (`Tests.setupMark`).
+   *
+   * Standard error rather than standard output because the runner reads both and shows both, and a
+   * test that prints on stdout should not have a mark land in the middle of a line it wrote. The
+   * result is discarded: there is nothing useful to do about a failed `write` here, and a run whose
+   * marks did not arrive is read as one that did not reach them, which is the safe direction.
+   */
+  private def emitMark(mark: Char): Unit =
+    emit(Inst.Call(Some(freshReg()), wordLty, Val.Global("write"),
+      List(Arg(i32, Val.Int(2)), Arg(LType.Ptr, stringGlobal(mark.toString)),
+           Arg(wordLty, Val.Int(1)))))
 
   /** **The computed `val`s where there is no entry point to lay them down in** — what `build-c`
    * gets in place of `@main` (`reference/modules.md § Where a program starts`).
