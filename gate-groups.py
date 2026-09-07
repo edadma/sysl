@@ -285,12 +285,22 @@ def main():
         return self_test()
 
     if len(sys.argv) != 3:
-        sys.exit('usage: gate-groups.py <test-source-root> <output-dir>')
+        sys.exit(f'usage: gate-groups.py <test-source-root>[{os.pathsep}<test-source-root>...] <output-dir>')
 
     self_test()
 
-    root, out = sys.argv[1], sys.argv[2]
-    found = suites(root)
+    # More than one root as of `native/src/test/scala`: a suite that reaches for `java.io.File` or a
+    # real child process, as a test of a native-only mechanism against the linked binary genuinely
+    # must, cannot live in `shared/src/test` at all -- Scala.js's `javalib` has neither, so a shared
+    # spec that used them would fail to *compile* on JS rather than merely being skippable there. The
+    # comment this replaces predicted exactly this: "the moment anybody adds native/src/test/scala
+    # the proxy diverges quietly, in the direction that reads as fine" -- found true 2026-09-07 by
+    # the reconciliation check two paragraphs down doing precisely the job it was built for.
+    roots, out = sys.argv[1].split(os.pathsep), sys.argv[2]
+    found = {}
+
+    for root in roots:
+        found.update(suites(root))
 
     heavy = sorted(HEAVY & found.keys())
     light = sorted(found.keys() - set(heavy))

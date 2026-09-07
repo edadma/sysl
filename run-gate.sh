@@ -39,7 +39,11 @@ set -u
 
 REPO=${0:a:h}
 LOGS=$REPO/target/gate
-SUITES=$REPO/shared/src/test/scala
+# Two roots as of `HeapCeilingTests`: a suite exercising a native-only mechanism against the linked
+# binary needs `java.io.File` and a real child process, neither of which Scala.js's `javalib`
+# carries, so it cannot live in `shared/src/test` at all -- `gate-groups.py` now takes a
+# colon-separated list and merges what each root finds.
+SUITES=$REPO/shared/src/test/scala:$REPO/native/src/test/scala
 
 HEAVY_HEAP=32g;  HEAVY_AGENTS=1     # a suite that builds for every target, on its own -- 24g was
                                     # not enough as of 2026-09-04; see below
@@ -200,10 +204,12 @@ python3 "$REPO/gate-groups.py" "$SUITES" "$LOGS" | tee -a "$SUMMARY" || exit 1
 # package manager among the sixteen it could not see. A fix alone would hold until the next support
 # trait; this is what makes it unable to recur.
 #
-# **Asked of the platform being gated**, not of the JVM. There is one test source root today, so the
-# two sets are identical and `syslJVM` would be a cheaper proxy — but the moment anybody adds
-# `native/src/test/scala` the proxy diverges quietly, in the direction that reads as fine, which is
-# the same failure this check exists to catch.
+# **Asked of the platform being gated**, not of the JVM. Two test source roots as of
+# `native/src/test/scala` (`SUITES`, above) rather than one, so `syslJVM/Test/definedTestNames` would
+# now be a cheaper proxy that quietly missed everything native-only — exactly the divergence this
+# paragraph used to warn about as a someday, and exactly what this check caught the day it happened:
+# `HeapCeilingTests` existed in `syslNative` and nowhere the grouper looked, until `SUITES` grew a
+# second root to match.
 #
 # It costs one sbt start; the test classes it needs compiled are ones the first group compiles anyway.
 print "reconciling the suite list against sbt" | tee -a "$SUMMARY"
