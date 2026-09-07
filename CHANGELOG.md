@@ -7,6 +7,23 @@ copy -- correct a mistake there and regenerate, rather than editing this file. V
 `MAJOR.MINOR.PATCH`; while the leading zero stands the language is still moving, and a release may
 change what an existing program means. Where it does, the release says so.
 
+## Unreleased
+
+#### Analysing a large program no longer costs the tables once per question
+
+The analyzer asks speculative questions everywhere -- whether a receiver has a member of some name,
+which of several overloads the arguments fit, whether a bare name resolves at all -- and each one is
+a real walk whose registrations have to be dropped again afterwards. It used to drop them by copying
+the six whole-program instantiation tables before the walk and putting them back after, which costs
+the size of the tables once per question: a program's instantiations multiplied by its call sites.
+
+The tables now keep an undo log instead, so a walk is taken back by what it *wrote* rather than by
+what the tables *hold*, and a question that registers nothing costs nothing. Measured on a generated
+program of 14,005 lines, analysis allocated 13,966 MB before and 862 MB after -- and, more to the
+point, the cost per line used to grow with the program (636 KB per line at 3,505 lines, 1,046 KB at
+14,005) and now falls (78 KB, then 65 KB). Nothing about what is compiled changes; large programs
+simply stop needing a heap proportional to their own square.
+
 ## 0.0.108 — 2026-09-07
 
 #### The compiler gives its own GC a heap ceiling by default

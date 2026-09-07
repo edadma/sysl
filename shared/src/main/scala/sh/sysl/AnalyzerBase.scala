@@ -337,42 +337,30 @@ trait AnalyzerBase extends Scoping {
    * from putting a type parameter into the emitted module.
    */
   protected def sandboxed[T](body: => T): T = {
-    val saved = registrations
+    val saved = marked()
 
     try body
-    finally rewind(saved)
+    finally
+      rewind(saved)
+      journal.leave()
   }
 
-  /** Everything `sandboxed` puts back, taken as one value so that a caller may decide *when* to put
-   * it back rather than only that it will be.
+  /** Where a speculative region has to rewind to, taken as one value so that a caller may decide
+   * *when* to put the tables back rather than only that it will.
+   *
+   * A mark is a position in a log rather than a copy of the tables: they record how to undo each write
+   * while a region is open ([[Journal]]), so what has to be remembered here is only where in that
+   * log the region started. The queue of instantiations still waiting for a body is the exception —
+   * it is a work list that is drained as it fills rather than a table that grows with the program,
+   * so copying it is a copy of what is in flight and not of what has been built.
    */
-  private case class Registrations(
-      structs: List[(String, Type.Struct)],
-      enums: List[(String, Type.Enum)],
-      funcs: List[(String, (List[(String, Type)], Type))],
-      tables: List[(String, TVtable)],
-      reached: List[String],
-      externs: List[String],
-      queued: List[(String, FuncDecl, Map[String, Type])],
-  )
+  private case class Mark(undo: Int, queued: List[(String, FuncDecl, Map[String, Type])])
 
-  private def registrations: Registrations =
-    Registrations(structInsts.toList, enumInsts.toList, funcInsts.toList, vtables.toList,
-                  funcsUsed.toList, externsUsed.toList, pending.toList)
+  private def marked(): Mark = Mark(journal.enter(), pending.toList)
 
-  private def rewind(saved: Registrations): Unit = {
-    restore(structInsts, saved.structs)
-    restore(enumInsts, saved.enums)
-    restore(funcInsts, saved.funcs)
-    restore(vtables, saved.tables)
-    funcsUsed.clear();   funcsUsed ++= saved.reached
-    externsUsed.clear(); externsUsed ++= saved.externs
+  private def rewind(saved: Mark): Unit = {
+    journal.rewind(saved.undo)
     pending.clear();     pending ++= saved.queued
-  }
-
-  private def restore[K, V](table: mutable.LinkedHashMap[K, V], saved: List[(K, V)]): Unit = {
-    table.clear()
-    table ++= saved
   }
 
   /** A question asked of the tables that is allowed to have no answer, with everything it registers
@@ -405,7 +393,7 @@ trait AnalyzerBase extends Scoping {
    * registered, nothing said, since `err` throws rather than recording.
    */
   protected def attempt[T](body: => T): Option[T] = {
-    val saved = registrations
+    val saved = marked()
     val said  = complaints
 
     def undo(): None.type = { rewind(saved); restoreComplaints(said); None }
@@ -421,6 +409,7 @@ trait AnalyzerBase extends Scoping {
     catch
       case AnalyzerError(_, _, _) => undo()
       case Poisoned()             => undo()
+    finally journal.leave()
   }
 
   /** Whether asking that question failed on a mistake **somebody has already been told about**,

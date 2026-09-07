@@ -36,7 +36,7 @@ package sh.sysl
  * *expected* type when the arguments alone do not determine them — which is what lets `None`
  * and `Ok(5)` take their type from the context they appear in.
  */
-class Analyzer private (
+class Analyzer private[sysl] (
     protected val units: List[Program],
     protected val building: Set[String],
     protected val std: Stdlib,

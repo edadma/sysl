@@ -19,6 +19,19 @@ import scala.collection.mutable
  */
 trait DeclTables extends Reporting {
 
+  /** The undo log the speculative walks rewind through (`AnalyzerBase.sandboxed`).
+   *
+   * It is declared first because the tables below are built against it, and a trait's fields are
+   * initialized in the order they are written.
+   */
+  protected val journal = new Journal
+
+  /** How many writes this analysis had to remember how to undo (`Journal.recorded`). */
+  private[sysl] def undoEntries: Long = journal.recorded
+
+  /** The longest the undo log ever got, which is how deep the speculation nested (`Journal.deepest`). */
+  private[sysl] def deepestUndoLog: Int = journal.deepest
+
   /** The library modules this compilation is **producing** rather than being supplied with.
    *
    * Empty for every ordinary compilation, which is what makes the library something a program never
@@ -461,7 +474,7 @@ trait DeclTables extends Reporting {
    * emitted under and registered the first time an erasure needs one. A program that never erases a
    * type carries none.
    */
-  protected val vtables = mutable.LinkedHashMap.empty[String, TVtable]
+  protected val vtables = new JournaledMap[String, TVtable](journal)
 
   /** A type's inherent members, keyed by (type name, member name). Methods, properties, and
    * associated functions all live here; each is also lowered to an ordinary function under the
@@ -562,8 +575,8 @@ trait DeclTables extends Reporting {
   /** Instantiated types, keyed by their display name (`Point`, `Option[int]`) and held in
    * dependency order — a type is inserted only after the types it contains.
    */
-  protected val structInsts = mutable.LinkedHashMap.empty[String, Type.Struct]
-  protected val enumInsts   = mutable.LinkedHashMap.empty[String, Type.Enum]
+  protected val structInsts = new JournaledMap[String, Type.Struct](journal)
+  protected val enumInsts   = new JournaledMap[String, Type.Enum](journal)
 
   /** Where an in-progress instantiation was entered: how many `*T` / `&T` wrappers the resolver was
    * inside, and how many **type argument** positions it was inside.
@@ -600,7 +613,7 @@ trait DeclTables extends Reporting {
   protected var typeArgDepth = 0
 
   /** Instantiated function signatures, keyed by the name codegen will emit. */
-  protected val funcInsts = mutable.LinkedHashMap.empty[String, (List[(String, Type)], Type)]
+  protected val funcInsts = new JournaledMap[String, (List[(String, Type)], Type)](journal)
 
   /** Every `extern` the program declares. A call to one resolves exactly as a call to a sysl
    * function does — the signature is in `funcInsts` like any other — so this exists only to say
@@ -612,7 +625,7 @@ trait DeclTables extends Reporting {
   /** The externs something in the program actually calls, in the order they were first reached.
    * An unused one is not declared in the output at all.
    */
-  protected val externsUsed = mutable.LinkedHashSet.empty[String]
+  protected val externsUsed = new JournaledSet[String](journal)
 
   /** Every `extern` **variable** the program declares (`reference/ffi.md § An extern also declares a variable`), by key. Storage the linker supplies
    * rather than storage this module lays down, which is the whole of what this table says about it:
@@ -663,7 +676,7 @@ trait DeclTables extends Reporting {
    * is worth analyzing and emitting at all, in either half of it: the printing surface is the
    * largest thing that hangs off this, and a program that never prints should carry none of it.
    */
-  protected val funcsUsed = mutable.LinkedHashSet.empty[String]
+  protected val funcsUsed = new JournaledSet[String](journal)
 
   /** Instantiations whose body has not been analyzed yet. Queued rather than analyzed inline
    * so an instantiation discovered mid-function does not disturb the enclosing context.
