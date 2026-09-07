@@ -24,6 +24,10 @@ point, the cost per line used to grow with the program (636 KB per line at 3,505
 14,005) and now falls (78 KB, then 65 KB). Nothing about what is compiled changes; large programs
 simply stop needing a heap proportional to their own square.
 
+Compiling `slate` -- 95,757 lines across 197 files, the largest sysl program there is -- now
+completes under `GC_MAXIMUM_HEAP_SIZE=24g` where it needed 36g, in 79 seconds against 92, at a
+25.8 GB peak against 36.9 GB.
+
 ## 0.0.108 — 2026-09-07
 
 #### The compiler gives its own GC a heap ceiling by default
