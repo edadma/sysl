@@ -5,14 +5,18 @@
 <p align="center">
   <a href="https://central.sonatype.com/artifact/sh.sysl/sysl_3"><img alt="Maven Central" src="https://img.shields.io/maven-central/v/sh.sysl/sysl_3"></a>
   <a href="https://github.com/sysl-lang/homebrew-tap"><img alt="Homebrew" src="https://img.shields.io/badge/dynamic/regex?url=https%3A%2F%2Fraw.githubusercontent.com%2Fsysl-lang%2Fhomebrew-tap%2Fmain%2FFormula%2Fsysl.rb&search=version%20%22(%5B%5E%22%5D%2B)%22&replace=%241&label=homebrew&color=fbb040"></a>
-  <a href="https://github.com/sysl-lang/sysl/commits"><img alt="Last Commit" src="https://img.shields.io/github/last-commit/sysl-lang/sysl"></a>
-  <img alt="License" src="https://img.shields.io/github/license/sysl-lang/sysl">
+  <a href="https://github.com/sysl-lang/sysl-bootstrap/commits"><img alt="Last Commit" src="https://img.shields.io/github/last-commit/sysl-lang/sysl-bootstrap"></a>
+  <img alt="License" src="https://img.shields.io/github/license/sysl-lang/sysl-bootstrap">
   <img alt="Scala Version" src="https://img.shields.io/badge/Scala-3.8.4-blue.svg">
   <img alt="Scala.js Version" src="https://img.shields.io/badge/Scala.js-1.22.0-blue.svg">
   <img alt="Scala Native Version" src="https://img.shields.io/badge/Scala_Native-0.5.12-blue.svg">
 </p>
 
 A modern, ref-counted, general-purpose systems language.
+
+> **This repository is the bootstrap compiler**, written in Scala. It builds the self-hosted `sysl`
+> compiler at [github.com/sysl-lang/sysl](https://github.com/sysl-lang/sysl) (that repository is
+> being created). The binary this repository produces is still called `sysl`.
 
 > **Status: specified in writing, and it runs.** This repository is a clean reimplementation of the
 > sysl language — not a port of the earlier prototype, which survives only as a source of lessons.

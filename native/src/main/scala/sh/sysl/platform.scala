@@ -81,7 +81,7 @@ def executablePath: Option[String] = {
  * `Out of heap space` or grew to the cap and stalled without finishing; 36g was the smallest that
  * completed, in 92 s with a measured peak of 36.9 GB (40g and 48g completed at the same peak,
  * confirming 36g as the floor rather than a fluke). Twice the smallest completing cap is 72 GB,
- * rounded up to the nearest power of two. `~/dev/sysl-lang/sysl/CLAUDE.md`'s heap-ceiling sections
+ * rounded up to the nearest power of two. `~/dev/sysl-lang/sysl-bootstrap/CLAUDE.md`'s heap-ceiling sections
  * have the rest of the method.
  */
 private[sysl] inline val DefaultMaxHeapSize = "128g"

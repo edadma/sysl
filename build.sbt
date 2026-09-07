@@ -19,8 +19,8 @@ ThisBuild / sonatypeProfileName := "sh.sysl"
 
 ThisBuild / scmInfo := Some(
   ScmInfo(
-    url("https://github.com/sysl-lang/sysl"),
-    "scm:git@github.com:sysl-lang/sysl.git",
+    url("https://github.com/sysl-lang/sysl-bootstrap"),
+    "scm:git@github.com:sysl-lang/sysl-bootstrap.git",
   ),
 )
 ThisBuild / developers := List(
@@ -32,7 +32,7 @@ ThisBuild / developers := List(
   ),
 )
 
-ThisBuild / homepage := Some(url("https://github.com/sysl-lang/sysl"))
+ThisBuild / homepage := Some(url("https://github.com/sysl-lang/sysl-bootstrap"))
 ThisBuild / description := "A modern, ref-counted, OS-level systems language — easier than Rust."
 
 // Where a publish goes, and there are two answers because Central is slow.
@@ -61,7 +61,7 @@ ThisBuild / description := "A modern, ref-counted, OS-level systems language —
 // stays exactly as mandatory as it was.
 ThisBuild / publishTo := {
   if (sys.env.contains("SYSL_PUBLISH_GITHUB"))
-    Some("GitHub Packages" at "https://maven.pkg.github.com/sysl-lang/sysl")
+    Some("GitHub Packages" at "https://maven.pkg.github.com/sysl-lang/sysl-bootstrap")
   else
     sonatypePublishToBundle.value
 }

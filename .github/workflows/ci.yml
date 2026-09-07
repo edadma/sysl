@@ -219,7 +219,7 @@ jobs:
         run: |
           set -euo pipefail
           v="${{ steps.interim.outputs.version }}"
-          url="https://maven.pkg.github.com/sysl-lang/sysl/sh/sysl/sysl_3/$v/sysl_3-$v.pom"
+          url="https://maven.pkg.github.com/sysl-lang/sysl-bootstrap/sh/sysl/sysl_3/$v/sysl_3-$v.pom"
           code=$(curl -s -o /dev/null -w '%{http_code}' -u "${{ github.actor }}:$GITHUB_TOKEN" "$url")
 
           echo "$v -> HTTP $code"

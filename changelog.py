@@ -21,7 +21,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-REPO = "sysl-lang/sysl"
+REPO = "sysl-lang/sysl-bootstrap"
 
 HEADER = """# Changelog
 
