@@ -56,6 +56,13 @@ def executablePath: Option[String] = {
  */
 def findOnPath(name: String): Option[String] = None
 
+/** No-op here — see the native implementation, the only one that does anything.
+ *
+ * Node's own garbage collector is V8's, not Scala Native's Immix, and is unaffected by
+ * `GC_MAXIMUM_HEAP_SIZE`, so there is no ceiling for this platform to give itself.
+ */
+def ensureHeapCeiling(programArgs: Seq[String]): Unit = ()
+
 /** A built program run as the driver's own foreground work — `Main`'s `run` command states the
  * contract this answers to.
  *

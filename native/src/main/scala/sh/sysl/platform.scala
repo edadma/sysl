@@ -1,7 +1,8 @@
 package sh.sysl
 
 import scala.scalanative.meta.LinktimeInfo
-import scala.scalanative.posix.stdlib.realpath
+import scala.scalanative.posix.stdlib.{getenv, realpath, setenv}
+import scala.scalanative.posix.unistd.execv
 import scala.scalanative.unsafe.*
 import scala.scalanative.unsigned.*
 
@@ -71,6 +72,72 @@ def executablePath: Option[String] = {
 
   if raw == null || realpath(raw, resolved) == null then None else Some(fromCString(resolved))
 }
+
+/** The ceiling this compiler puts on its own GC when the caller has not chosen one — see
+ * `ensureHeapCeiling`, the only place this is read.
+ *
+ * Picked by measurement (2026-09-07) against `slate`, the largest sysl program there is (95,757
+ * lines across 197 files): capped runs at 2g, 4g, 8g, 16g and 32g all either crashed with
+ * `Out of heap space` or grew to the cap and stalled without finishing; 36g was the smallest that
+ * completed, in 92 s with a measured peak of 36.9 GB (40g and 48g completed at the same peak,
+ * confirming 36g as the floor rather than a fluke). Twice the smallest completing cap is 72 GB,
+ * rounded up to the nearest power of two. `~/dev/sysl-lang/sysl/CLAUDE.md`'s heap-ceiling sections
+ * have the rest of the method.
+ */
+private[sysl] inline val DefaultMaxHeapSize = "128g"
+
+/** What this compiler would set `GC_MAXIMUM_HEAP_SIZE` to, given what it already reads there — or
+ * `None` where the caller has already chosen, which `ensureHeapCeiling` takes as "leave it alone."
+ *
+ * Held apart from `ensureHeapCeiling` so the decision is a value a test can ask for without paying
+ * for a real `setenv` and `execv`: this is the whole of the policy, and everything below it is
+ * mechanism.
+ */
+private[sysl] def heapCeilingDecision(current: Option[String]): Option[String] =
+  Option.when(current.isEmpty)(DefaultMaxHeapSize)
+
+/** Give the Immix collector a ceiling before it can grow past one, unless the caller already gave
+ * it one of their own.
+ *
+ * Scala Native's Immix GC reads `GC_MAXIMUM_HEAP_SIZE` from the environment at GC init — before
+ * `main` runs — and defaults to **unlimited** when it is absent (`Settings_MaxHeapSize` in the
+ * runtime's own `gc/immix/Settings.c`, answering `UNLIMITED_HEAP_SIZE` from `Constants.h`). So an
+ * installed compiler run on a large program grows until it meets physical memory rather than
+ * collecting, which is what a hosted runner's `Out of heap space grow heap` is. There is no
+ * link-time hook for this default: the setting is read directly from the environment by C code
+ * this project does not own, and Scala Native's `NativeConfig` has nothing that reaches it.
+ *
+ * So the ceiling is set here, in the compiler's own entry point, before anything of size has been
+ * allocated: `setenv` the default, then **re-exec this same binary with the same arguments**.
+ * `execv` replaces the process image outright rather than forking a child, so stdin, stdout,
+ * stderr and the eventual exit status all carry through unchanged — there is no parent left
+ * to relay them. The child inherits the environment `setenv` just mutated, so its own GC sees
+ * `GC_MAXIMUM_HEAP_SIZE` already set and `heapCeilingDecision` is what stops a second re-exec:
+ * the guard and the fix are the same environment variable.
+ *
+ * A build that cannot resolve its own path — `executablePath` answers `None` off this platform's
+ * mac/Linux pair, which is every target this compiler ships for — falls back to a PATH lookup of
+ * its own command name, and running under neither leaves the process to start uncapped rather
+ * than fail outright: growing without bound is the defect this exists to fix, not one worth
+ * trading for a compiler that will not start at all.
+ */
+def ensureHeapCeiling(programArgs: Seq[String]): Unit =
+  heapCeilingDecision(Option(getenv(c"GC_MAXIMUM_HEAP_SIZE")).map(p => fromCString(p))).foreach { ceiling =>
+    Zone.acquire { implicit z =>
+      setenv(c"GC_MAXIMUM_HEAP_SIZE", toCString(ceiling), 1)
+
+      executablePath.orElse(findOnPath("sysl")).foreach { path =>
+        val cArgs = (path +: programArgs).map(toCString)
+        val argv  = stackalloc[CString](cArgs.length + 1)
+
+        for i <- cArgs.indices do argv(i) = cArgs(i)
+        argv(cArgs.length) = null
+
+        execv(toCString(path), argv)
+        // execv only returns on failure — fall through and run uncapped.
+      }
+    }
+  }
 
 /** Where `name` sits on the PATH, if it is there and can be run.
  *

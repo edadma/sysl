@@ -24,6 +24,14 @@ def hostMachine: (String, String) =
  */
 def executablePath: Option[String] = None
 
+/** No-op here — see the native implementation, the only one that does anything.
+ *
+ * The JVM's own heap is capped by `.jvmopts`' `-Xmx8g`, unrelated to Scala Native's Immix GC and
+ * already in force before this or any other Scala code runs, so there is no ceiling for this
+ * platform to give itself.
+ */
+def ensureHeapCeiling(programArgs: Seq[String]): Unit = ()
+
 /** Where `name` sits on the PATH, if it is there and can be run.
  *
  * This is what makes an external subcommand possible: `sysl doc` looks for `sysl-doc` and hands it

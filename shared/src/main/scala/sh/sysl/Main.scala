@@ -6,7 +6,10 @@ import io.github.edadma.cross_platform.*
 // and the questions it has to settle before compiling — which target, which standard module,
 // and whether this command line answered what the packages asked for.
 
-@main def sysl(args: String*): Unit = processExit(drive(processArgs(args)))
+@main def sysl(args: String*): Unit = {
+  ensureHeapCeiling(args)
+  processExit(drive(processArgs(args)))
+}
 
 /** The whole of a command line, from the first word to the status it leaves.
  *

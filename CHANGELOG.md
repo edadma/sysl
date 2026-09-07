@@ -7,6 +7,31 @@ copy -- correct a mistake there and regenerate, rather than editing this file. V
 `MAJOR.MINOR.PATCH`; while the leading zero stands the language is still moving, and a release may
 change what an existing program means. Where it does, the release says so.
 
+## Unreleased
+
+Written by hand ahead of the release that carries it, so that the release body has it. Everything
+below the next heading is generated and this entry is not; it moves into the generated text when the
+release is cut.
+
+### The compiler gives its own GC a heap ceiling by default
+
+Scala Native's Immix collector reads `GC_MAXIMUM_HEAP_SIZE` from the environment and defaults to
+**unlimited** when it is absent, so a large program compiled by someone who had never heard of the
+variable grew until it met physical memory rather than collecting — on a memory-constrained host,
+`Out of heap space grow heap` followed by a hang rather than a clean failure.
+
+The compiler now sets `GC_MAXIMUM_HEAP_SIZE=128g` on itself before it allocates anything of size,
+unless the caller already set one — a caller's own value is always left exactly as given. There is
+no link-time hook for the GC's own default, so the mechanism is the compiler's own entry point:
+`setenv` the default, then re-exec the same binary with the same arguments. `execv` replaces the
+process image outright, so stdin, stdout, stderr and the eventual exit status all carry through
+unchanged, and the re-exec cannot loop — the variable it sets is what stops it running a second time.
+
+128 GB was picked by measurement against `slate`, the largest sysl program there is: capped runs at
+2, 4, 8, 16 and 32 GB each either ran out of heap in seconds or grew to the cap and made no further
+progress, 36 GB was the smallest that completed (92 s, 36.9 GB peak, confirmed at 40 and 48 GB too),
+and the default is twice that floor, rounded up to the nearest power of two.
+
 ## 0.0.107 — 2026-09-07
 
 #### A parse holds one memo table per token, not one per step
