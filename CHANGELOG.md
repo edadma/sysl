@@ -7,6 +7,28 @@ copy -- correct a mistake there and regenerate, rather than editing this file. V
 `MAJOR.MINOR.PATCH`; while the leading zero stands the language is still moving, and a release may
 change what an existing program means. Where it does, the release says so.
 
+## 0.0.106 — 2026-09-07
+
+A language and library release. `sysl test` gains setup and teardown hooks, and `sysl.unicode.fold` fixes an ordering bug in casefolding.
+
+### `sysl test` gains `@setup`, `@teardown`, `@setup_all` and `@teardown_all`
+
+A module may now write `@setup` and `@teardown`, which run before and after each `@test` it declares, and `@setup_all` and `@teardown_all`, which run once around the module's whole run. At most one of each per module — a second is refused, and the message names the first.
+
+The scope is the module and the process is the point. `@setup` runs inside the test's own process, so what it leaves in module storage is what the test finds. `@teardown` runs in that process where the test returned, and in a process of its own where it did not — a trap takes the process with it, so what a teardown can release there is what outlives a process. The `_all` hooks are their own invocations for the same reason, and share with a test only what outlives one: a file, a pid, a path.
+
+A fault anywhere in one process leaves the same exit status, so the dispatcher writes a byte to standard error as it passes each boundary and the runner reads how far the run reached off what arrived. A `_all` hook that does not come back has no test to hang a failure on and gets a row of its own, and a module whose `@setup_all` failed runs none of its tests.
+
+See [`reference/attributes.md § The hooks a module may write`](https://sysl.sh/reference/attributes/#the-hooks-a-module-may-write).
+
+### `sysl.unicode.fold` decomposes before casefolding
+
+`utf8proc` applies its casefold mapping per code point ahead of canonical reordering, so folding straight to `Casefold | Compose` could leave a mark the casefold mapping introduces sitting where the original character was rather than where its combining class puts it — `U+1FA4` is the case this was found on. Unicode caseless matching is NFD, then fold, then NFD, so `fold` now decomposes first and lets the second pass reorder and recompose:
+
+```
+fold(s) = mapped(mapped(s, Stable | Decompose), Stable | Compose | Casefold)
+```
+
 ## 0.0.105 — 2026-09-05
 
 **a start offset on every search, and Horspool under the ones over bytes**
