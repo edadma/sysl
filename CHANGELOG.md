@@ -7,13 +7,9 @@ copy -- correct a mistake there and regenerate, rather than editing this file. V
 `MAJOR.MINOR.PATCH`; while the leading zero stands the language is still moving, and a release may
 change what an existing program means. Where it does, the release says so.
 
-## Unreleased
+## 0.0.108 — 2026-09-07
 
-Written by hand ahead of the release that carries it, so that the release body has it. Everything
-below the next heading is generated and this entry is not; it moves into the generated text when the
-release is cut.
-
-### The compiler gives its own GC a heap ceiling by default
+#### The compiler gives its own GC a heap ceiling by default
 
 Scala Native's Immix collector reads `GC_MAXIMUM_HEAP_SIZE` from the environment and defaults to
 **unlimited** when it is absent, so a large program compiled by someone who had never heard of the
