@@ -9,6 +9,24 @@ change what an existing program means. Where it does, the release says so.
 
 ## Unreleased
 
+#### The scanner no longer rebuilds itself at every token
+
+Reading a file cost about as much as understanding it. The scanner's `token` rule was a method, and
+the library asks for it once per token, so the whole eleven-way alternation -- and, underneath it,
+the operator match, which sorted a copy of the fifty-two operators and folded one per-character
+parser for each of them, every one carrying its own refusal message -- was built from scratch for
+every token in the file and then thrown away. The same shape appeared in every repetition in the
+grammar: `rep` takes the rule it repeats by name and evaluates it *inside* the parser it returns, so
+a repetition written over an expression rebuilt that expression at every element it read.
+
+Operators are now matched by reading the characters and taking the longest spelling that stands
+there, the alternation and every repeated rule are built once, and the ordinary run of whitespace
+before a token is walked directly instead of going round a combinator loop per character. A parse of
+a 7,005-line program allocated 203,500 bytes per line of source and now allocates 101,700 -- the
+scan alone fell from 78,400 to 20,900. Nothing about what is read changes: the operator set is
+prefix-closed, so longest-match is the answer the folded chain gave, and the refusal a reader sees
+where no rule fits is the one it reported before.
+
 #### Analysing a large program no longer costs the tables once per question
 
 The analyzer asks speculative questions everywhere -- whether a receiver has a member of some name,

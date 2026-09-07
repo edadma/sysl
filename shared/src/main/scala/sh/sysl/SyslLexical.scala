@@ -426,11 +426,210 @@ class SyslLexical
     buf.toList
   }
 
-  override def token: Parser[Token] =
-    interpString | rawString | cString | identifier | number | label | character | string | quotedIdent |
-      (elem(EofCh) ^^^ EOF) | delim | failure(
-        "illegal character",
+  /** What may stand at a position, tried in order — one array walked, rather than an eleven-deep
+   * chain of `|` rebuilt at every token in the file.
+   *
+   * `Scanners.token` is a `def` and the scanner asks for it once per token, so writing the
+   * alternation as an expression rebuilt all eleven parsers, and everything underneath them, for
+   * each token scanned. `|` also costs at the point it is *applied*: each link hands its right side
+   * to `ParseResult.append` by name, which allocates a thunk whether or not the alternative is
+   * reached.
+   *
+   * **The order and the refusal are the chain's, exactly.** The first alternative that succeeds
+   * answers, an `Error` stops the search where `Error.append` would have, and where all of them
+   * decline the refusal reported is the one furthest into the file — ties going to the later
+   * alternative, which is how `Failure.append` breaks them and is what leaves `illegal character`,
+   * written last and refusing at the token's own start, as the message for a character no rule
+   * wanted.
+   *
+   * What is not reproduced is the `lastFailure` a chain records on the result it succeeds with. It
+   * is read by `phrase`, to say how far a *parse* got, and there is no such reader on this side: a
+   * scan that cannot go on becomes an error token carrying `msg` and nothing else.
+   */
+  override lazy val token: Parser[Token] = {
+    val alternatives: Array[Parser[Token]] =
+      Array(
+        interpString,
+        rawString,
+        cString,
+        identifier,
+        number,
+        label,
+        character,
+        string,
+        quotedIdent,
+        elem(EofCh) ^^^ EOF,
+        delim,
       )
+
+    Parser { in =>
+      var i        = 0
+      var answered = null: ParseResult[Token]
+      var refused  = null: NoSuccess
+
+      while i < alternatives.length && answered == null do
+        alternatives(i)(in) match {
+          case s: Success[Token] => answered = s
+          case e: Error          => answered = e
+          case f: Failure        => if refused == null || !(f.next.pos < refused.next.pos) then refused = f
+        }
+
+        i += 1
+
+      if answered ne null then answered
+      else {
+        val illegal = Failure("illegal character", in)
+
+        if refused != null && illegal.next.pos < refused.next.pos then refused else illegal
+      }
+    }
+  }
+
+  /** A space, a tab or a carriage return, refused with a message built **once**.
+   *
+   * `elem(kind, p)` hands `acceptIf` a function that builds `kind + " expected"`, and `acceptIf`
+   * calls it at every refusal — so the character in front of every token in the file, which is not
+   * whitespace by definition, built that string. The set of characters is the one it overrides, and
+   * the words are the same.
+   */
+  override lazy val whitespaceChar: Parser[Char] = {
+    val wanted = "space char expected"
+
+    Parser { in =>
+      val c = in.first
+
+      if c == ' ' || c == '\t' || c == '\r' then Success(c, in.rest) else Failure(wanted, in)
+    }
+  }
+
+  /** The run of whitespace and comments before a token: plain whitespace walked directly, and
+   * anything else left to the rule that knows about comments.
+   *
+   * That rule is `rep(whitespaceChar | lineComment | blockComment)`, and a repetition costs a
+   * `ListBuffer`, a `Success`, and a refusal from each alternative it did not take — for every
+   * character of indentation in the file. Walking the ordinary case here leaves the loop below one
+   * round to do: the round that finds a comment, or the round that finds nothing and stops.
+   *
+   * **The characters skipped are exactly [[whitespaceChar]]'s**, and what is left is handed on
+   * unread, so the two together consume what the repetition alone consumed — including the
+   * whitespace after a comment, since the loop goes on from wherever this stopped.
+   */
+  override lazy val whitespace: Parser[Any] = {
+    val rest = super.whitespace
+
+    Parser { in =>
+      var at = in
+      var c  = at.first
+
+      while c == ' ' || c == '\t' || c == '\r' do
+        at = at.rest
+        c = at.first
+
+      rest(at)
+    }
+  }
+
+  /** `rep`, with the rule it repeats built **once** rather than once per element.
+   *
+   * `Parsers.rep1` takes its operand by name and evaluates it *inside* the parser it returns, so an
+   * operand written as an expression — `rep(whitespaceChar | lineComment | blockComment)`, which is
+   * how the whitespace between two tokens is scanned — is rebuilt at every character of whitespace
+   * in the file, alternation, terminals, refusal messages and all. Forcing it into a `lazy val`
+   * first leaves the library's own loop unchanged and hands it the same parser every time.
+   *
+   * A grammar's rule does not depend on where it is applied, so building it once is the same
+   * grammar; nothing in this lexer or in `indentation` writes an operand that could differ between
+   * two elements of one repetition.
+   */
+  override def rep[T](p: => Parser[T]): Parser[List[T]] = {
+    lazy val q = p
+
+    super.rep(q)
+  }
+
+  override def rep1[T](p: => Parser[T]): Parser[List[T]] = {
+    lazy val q = p
+
+    super.rep1(q)
+  }
+
+  override def rep1[T](first: => Parser[T], p: => Parser[T]): Parser[List[T]] = {
+    lazy val f = first
+    lazy val q = p
+
+    super.rep1(f, q)
+  }
+
+  /** The operator match: the longest spelling that stands at this position, found by **looking at
+   * the characters** rather than by trying fifty-two parsers over them.
+   *
+   * `StdLexical.delim` is a `def` that sorts a copy of the delimiter set and folds one parser per
+   * spelling, each of those a per-character `elem` chain carrying its own `'c' expected` string —
+   * and `token` asks for it at every token in the file, so the whole structure was rebuilt and then
+   * walked once per token. Reading the characters instead is the same answer for a hundredth of the
+   * work: it allocates one `Keyword` and one reader per operator matched, and nothing at all for one
+   * that is not there.
+   *
+   * **It is the same answer because the operator set is prefix-closed**: every proper prefix of an
+   * operator is itself an operator (`<<` and `<` beside `<<=`, `..` and `.` beside `...`). The fold
+   * tried the spellings in descending lexicographic order, which is longest-first among spellings
+   * that share a prefix, so it too answered with the longest match — and where nothing matches at
+   * all, both fail at the position they began, which is what lets `token`'s own `illegal character`
+   * be the message a reader sees.
+   */
+  override lazy val delim: Parser[Token] = {
+    val widest = delimiters.map(_.length).max
+
+    // Indexed by length, so a position is asked "is there an operator of n characters here" from the
+    // longest down and stops at the first yes.
+    val byWidth: Array[Set[String]] =
+      Array.tabulate(widest + 1)(n => delimiters.filter(_.length == n).toSet)
+
+    Parser { in =>
+      val matched = in match {
+        case r: CharSequenceReader =>
+          val text  = r.source
+          val start = r.offset
+          val room  = math.min(widest, text.length - start)
+          var width = room
+          var found = null: String
+
+          while width > 0 && found == null do
+            val candidate = text.subSequence(start, start + width).toString
+
+            if byWidth(width).contains(candidate) then found = candidate
+
+            width -= 1
+
+          found
+
+        case _ =>
+          // Any other reader answers the same question one character at a time. Nothing in this
+          // compiler scans from one, and the lexer is not the place to assume so.
+          var width = widest
+          var found = null: String
+
+          while width > 0 && found == null do
+            val b = new StringBuilder
+            var r = in
+            var i = 0
+
+            while i < width && !r.atEnd do
+              b += r.first
+              r = r.rest
+              i += 1
+
+            if i == width && byWidth(width).contains(b.toString) then found = b.toString
+
+            width -= 1
+
+          found
+      }
+
+      if matched == null then Failure("no matching delimiter", in)
+      else Success(Keyword(matched), in.drop(matched.length))
+    }
+  }
 
   private def isDigit(c: Char): Boolean    = c >= '0' && c <= '9'
   private def isHexDigit(c: Char): Boolean = isDigit(c) || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')

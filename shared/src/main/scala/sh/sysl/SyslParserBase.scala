@@ -265,6 +265,37 @@ trait SyslParserBase extends PackratParsers {
     }
   }
 
+  /** `rep`, with the rule it repeats built **once** rather than once per element.
+   *
+   * `Parsers.rep1` takes its operand by name and evaluates it *inside* the parser it returns, so an
+   * operand written as an expression — which is how nearly every repetition in this grammar is
+   * written — is rebuilt at every element of every list the file contains, alternation, terminals
+   * and refusal messages included. Forcing it into a `lazy val` first leaves the library's own loop
+   * unchanged and hands it the same parser every time.
+   *
+   * A rule does not depend on where it is applied, so building it once is the same grammar. The
+   * `lazy val` is what keeps an operand naming a rule declared later in the file reachable, exactly
+   * as [[at]] and [[describe]] do.
+   */
+  override def rep[T](p: => Parser[T]): Parser[List[T]] = {
+    lazy val q = p
+
+    super.rep(q)
+  }
+
+  override def rep1[T](p: => Parser[T]): Parser[List[T]] = {
+    lazy val q = p
+
+    super.rep1(q)
+  }
+
+  override def rep1[T](first: => Parser[T], p: => Parser[T]): Parser[List[T]] = {
+    lazy val f = first
+    lazy val q = p
+
+    super.rep1(f, q)
+  }
+
   /** The current position, consuming nothing — for a rule that builds its node from a tail it
    * has already passed, where the tail's own start is the better place to point.
    */
