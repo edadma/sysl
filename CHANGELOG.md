@@ -27,6 +27,11 @@ scan alone fell from 78,400 to 20,900. Nothing about what is read changes: the o
 prefix-closed, so longest-match is the answer the folded chain gave, and the refusal a reader sees
 where no rule fits is the one it reported before.
 
+On Native, where the collector grows the heap to the allocation rate rather than collecting, that
+halving moves what a build needs to run at all: a hello-world now finishes inside
+`GC_MAXIMUM_HEAP_SIZE=1g` where it needed 3g, and `slate` -- 95,757 lines, the largest sysl program
+there is -- completes at 20g against 24g, at a 19.0 GB peak against 25.8 GB.
+
 #### Analysing a large program no longer costs the tables once per question
 
 The analyzer asks speculative questions everywhere -- whether a receiver has a member of some name,
