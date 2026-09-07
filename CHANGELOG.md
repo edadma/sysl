@@ -7,9 +7,11 @@ copy -- correct a mistake there and regenerate, rather than editing this file. V
 `MAJOR.MINOR.PATCH`; while the leading zero stands the language is still moving, and a release may
 change what an existing program means. Where it does, the release says so.
 
-## Unreleased
+## 0.0.109 — 2026-09-07
 
-#### The scanner no longer rebuilds itself at every token
+`slate` (95,757 lines, the largest sysl program there is) now builds under a `GC_MAXIMUM_HEAP_SIZE=20g` cap, at a 19.0 GB peak, down from 36.9 GB in 0.0.108 -- and a hello-world finishes inside `1g`, down from `3g`.
+
+##### The scanner no longer rebuilds itself at every token
 
 Reading a file cost about as much as understanding it. The scanner's `token` rule was a method, and
 the library asks for it once per token, so the whole eleven-way alternation -- and, underneath it,
@@ -32,7 +34,7 @@ halving moves what a build needs to run at all: a hello-world now finishes insid
 `GC_MAXIMUM_HEAP_SIZE=1g` where it needed 3g, and `slate` -- 95,757 lines, the largest sysl program
 there is -- completes at 20g against 24g, at a 19.0 GB peak against 25.8 GB.
 
-#### Analysing a large program no longer costs the tables once per question
+##### Analysing a large program no longer costs the tables once per question
 
 The analyzer asks speculative questions everywhere -- whether a receiver has a member of some name,
 which of several overloads the arguments fit, whether a bare name resolves at all -- and each one is
