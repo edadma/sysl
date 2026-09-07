@@ -7,13 +7,9 @@ copy -- correct a mistake there and regenerate, rather than editing this file. V
 `MAJOR.MINOR.PATCH`; while the leading zero stands the language is still moving, and a release may
 change what an existing program means. Where it does, the release says so.
 
-## Unreleased
+## 0.0.107 — 2026-09-07
 
-Written by hand ahead of the release that carries it, so that the release body has it. Everything
-below the next heading is generated and this entry is not; it moves into the generated text when the
-release is cut.
-
-### A parse holds one memo table per token, not one per step
+#### A parse holds one memo table per token, not one per step
 
 `PackratReader.rest` answers a **new** reader on every call, and every reader carries its own memo
 table. A rule consumes each token many times over a backtracking parse and every memoized result
