@@ -7,6 +7,35 @@ copy -- correct a mistake there and regenerate, rather than editing this file. V
 `MAJOR.MINOR.PATCH`; while the leading zero stands the language is still moving, and a release may
 change what an existing program means. Where it does, the release says so.
 
+## Unreleased
+
+Written by hand ahead of the release that carries it, so that the release body has it. Everything
+below the next heading is generated and this entry is not; it moves into the generated text when the
+release is cut.
+
+### A parse holds one memo table per token, not one per step
+
+`PackratReader.rest` answers a **new** reader on every call, and every reader carries its own memo
+table. A rule consumes each token many times over a backtracking parse and every memoized result
+keeps the reader it ended at, so those tables — allocated, immediately shadowed, never read — were
+retained for the whole file. Measured over a 4,000-line program: 129 MB still live at the end of a
+parse whose tree is 5 MB, or about 33 KB for every line of source.
+
+The reader is now one instance per token position, built the first time the position is reached and
+reused after. The memo is sound at that granularity because it is only ever consulted at the
+reader's own position — the same entry is found by the same lookup — and the single
+`(parser, position)` map that used to hold the whole file at once, whose `growTable` is where a
+large build ran out of heap, is now one small map per token. The same program leaves **236 bytes a
+line**, and a hello-world compiles under `GC_MAXIMUM_HEAP_SIZE=512m`, which used to run out of heap
+at four times that.
+
+Three smaller allocations went with it: the grammar's `at`, `describe`, `maybe`, `asOneToken` and
+`repeatedly` bound their by-name argument once instead of rebuilding the whole sub-parser on every
+application, and a terminal's `… expected` is built when the terminal is, not on every token it
+declines.
+
+Nothing about the grammar moved, so every program parses to exactly the tree it did.
+
 ## 0.0.106 — 2026-09-07
 
 A language and library release. `sysl test` gains setup and teardown hooks, and `sysl.unicode.fold` fixes an ordering bug in casefolding.

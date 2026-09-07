@@ -42,11 +42,55 @@ trait SyslParserBase extends PackratParsers {
    */
   protected class TokenReader(tokens: List[(lexical.Token, Position)], past: Position)
       extends Reader[lexical.Token] {
-    def first: lexical.Token        = if (tokens.isEmpty) lexical.EOF else tokens.head._1
-    def rest: Reader[lexical.Token] = if (tokens.isEmpty) this else new TokenReader(tokens.tail, past)
-    def pos: Position               = if (tokens.isEmpty) past else tokens.head._2
-    def atEnd: Boolean              = tokens.isEmpty
+    def first: lexical.Token = if (tokens.isEmpty) lexical.EOF else tokens.head._1
+    def pos: Position        = if (tokens.isEmpty) past else tokens.head._2
+    def atEnd: Boolean       = tokens.isEmpty
+
+    /** One reader per token, built the first time the position is reached and reused after.
+     *
+     * A `def` here would answer a *new* reader every time a rule consumed this token, and a rule
+     * consumes each token many times over a backtracking parse. [[PositionReader]] says what that
+     * costs.
+     */
+    lazy val rest: Reader[lexical.Token] =
+      if (tokens.isEmpty) this else new TokenReader(tokens.tail, past)
   }
+
+  /** A [[PackratReader]] that answers **one reader per token position** rather than a fresh one per
+   * step, which is what keeps a parse's memory proportional to the file rather than to the number
+   * of times the grammar walked over it.
+   *
+   * `PackratReader.rest` is a `def` that builds a new reader — and, with it, a new memo table and a
+   * new recursion-head table — on every call. Every token a rule consumes calls it, every
+   * alternative that backtracks calls it again, and every memoized result *keeps* the reader it
+   * ended at, so the tables that reader allocated and never used are retained for the whole parse.
+   * That is the dominant cost of parsing a file: measured over a 4,000-line program before this,
+   * 1.4 GB allocated and 129 MB still live at the end of the parse, against a 5 MB tree.
+   *
+   * Answering the same reader for the same position is sound because the memo is only ever
+   * consulted at the reader's *own* position — `getFromCache`, `updateCacheAndGet` and the
+   * recursion heads all key on `pos`, and `pos` is fixed for a given reader. A table per position
+   * is therefore the same table, indexed one level earlier: the same entry is found by the same
+   * lookup, and the giant `(parser, position)` map that used to hold the whole file at once —
+   * whose `growTable` is where a large build ran out of heap — is replaced by one small map per
+   * token, holding only the rules that were tried there.
+   */
+  protected class PositionReader(under: Reader[lexical.Token]) extends PackratReader[lexical.Token](under) {
+    readersBuilt += 1
+
+    override lazy val rest: Reader[lexical.Token] =
+      if (under.atEnd) this else new PositionReader(under.rest)
+  }
+
+  /** How many [[PositionReader]]s this parser has built — which is what says the memo is laid out
+   * per position rather than per step, and is the only observable that distinguishes the two.
+   *
+   * A parse builds one reader per token it reaches and never a second, so this is bounded by the
+   * file's token count however long the grammar spends backtracking over it. It is a plain count
+   * rather than anything about time or memory on purpose: a test can assert on it, and it cannot
+   * pass or fail because of the machine.
+   */
+  private[sysl] var readersBuilt: Int = 0
 
   /** The token list this parser reads, each token's position widened into the span it occupies.
    *
@@ -61,7 +105,7 @@ trait SyslParserBase extends PackratParsers {
       case None         => TokenPos.after(source, 0, 0)
     }
 
-    new PackratReader(new TokenReader(tokens, past))
+    new PositionReader(new TokenReader(tokens, past))
   }
 
   /** The scanned tokens, each with the offset just past it resolved into a line and a column, and
@@ -158,9 +202,11 @@ trait SyslParserBase extends PackratParsers {
    * statement wanted there is a newline, and dropping the road not taken is what lets it say so.
    * Rebuilding the result is how the field is emptied, since it cannot be written.
    */
-  protected def at[T <: Positioned](p: => Parser[T]): Parser[T] =
+  protected def at[T <: Positioned](p: => Parser[T]): Parser[T] = {
+    lazy val q = p
+
     Parser { in =>
-      p(in) match {
+      q(in) match {
         case s @ Success(t, rest) =>
           val span = spanOf(in, rest)
 
@@ -171,6 +217,7 @@ trait SyslParserBase extends PackratParsers {
         case other => other
       }
     }
+  }
 
   /** Renames the failure `p` reports when it fails **without consuming anything**, so the reader is
    * told what was wanted rather than which candidate the grammar happened to try last.
@@ -184,13 +231,39 @@ trait SyslParserBase extends PackratParsers {
    * The rename fires only at the rule's own start. A failure further along is the grammar having got
    * somewhere and then found something specific missing, and that message is the better one.
    */
-  protected def describe[T](what: String)(p: => Parser[T]): Parser[T] =
+  protected def describe[T](what: String)(p: => Parser[T]): Parser[T] = {
+    lazy val q = p
+    val wanted = s"$what expected"
+
     Parser { in =>
-      p(in) match {
-        case f: Failure if !(in.pos < f.next.pos) => Failure(s"$what expected", in)
+      q(in) match {
+        case f: Failure if !(in.pos < f.next.pos) => Failure(wanted, in)
         case other                                => other
       }
     }
+  }
+
+  /** [[scala.util.parsing.combinator.Parsers.accept]], with the refusal's words built **once**
+   * rather than on every token the terminal declines.
+   *
+   * `acceptMatch` concatenates `expected + " expected"` inside the parser, so a terminal offered a
+   * token it does not want builds a string to say so — and a backtracking grammar offers every
+   * terminal to very nearly every token, almost always to be refused. Building those strings was
+   * the largest single allocation site in a parse, and none of them is ever read: only the furthest
+   * failure is reported.
+   *
+   * The message and the behaviour are exactly the library's, including `end of input`; what changes
+   * is when the text is assembled.
+   */
+  override def accept[U](expected: String, f: PartialFunction[Elem, U]): Parser[U] = {
+    val wanted = expected + " expected"
+
+    Parser { in =>
+      if (in.atEnd) Failure("end of input", in)
+      else if (f.isDefinedAt(in.first)) Success(f(in.first), in.rest)
+      else Failure(wanted, in)
+    }
+  }
 
   /** The current position, consuming nothing — for a rule that builds its node from a tail it
    * has already passed, where the tail's own start is the better place to point.
@@ -329,13 +402,16 @@ trait SyslParserBase extends PackratParsers {
    * further into the file. Where the enclosing rule is a [[maybe]] or a [[repeatedly]], reporting at
    * the start is also what lets them recognise the construct as absent and say nothing at all.
    */
-  protected def asOneToken[T](p: => Parser[T]): Parser[T] =
+  protected def asOneToken[T](p: => Parser[T]): Parser[T] = {
+    lazy val q = p
+
     Parser { in =>
-      p(in) match {
+      q(in) match {
         case f: Failure => Failure(f.msg, in)
         case other      => other
       }
     }
+  }
 
   /** `opt(p)` for a construct whose **absence is ordinary**, such as a file's module header.
    *
@@ -345,9 +421,11 @@ trait SyslParserBase extends PackratParsers {
    * simply is not there. A refusal *after* one is kept, exactly as `opt` keeps it, because by then
    * the writer had started the construct and the complaint is about how it goes on.
    */
-  protected def maybe[T](p: => Parser[T]): Parser[Option[T]] =
+  protected def maybe[T](p: => Parser[T]): Parser[Option[T]] = {
+    lazy val q = p
+
     Parser { in =>
-      p(in) match {
+      q(in) match {
         case s @ Success(_, _)                 => s.map(Some(_))
         // Past the first token the writer had started the construct, so the complaint is worth
         // keeping — and `append` onto a `Success` is how the library itself records one.
@@ -356,6 +434,7 @@ trait SyslParserBase extends PackratParsers {
         case e: Error                          => e
       }
     }
+  }
 
   /** `rep(p)` for a construct whose **absence is ordinary** — the repeated form of [[maybe]].
    *
@@ -365,11 +444,19 @@ trait SyslParserBase extends PackratParsers {
    * recorded first, and this one is recorded before the statement that will actually fail — so it
    * won, and a file opening with a stray bracket was told `newline expected`.
    */
-  protected def repeatedly[T](p: => Parser[T]): Parser[List[T]] =
-    maybe(p) >> {
-      case Some(x) => repeatedly(p) ^^ (x :: _)
+  protected def repeatedly[T](p: => Parser[T]): Parser[List[T]] = {
+    // One parser for the whole repetition rather than one per element. The recursion is on the
+    // `lazy val`, so every round of the loop reads the same two parsers instead of rebuilding
+    // `maybe(p)` and the tail from scratch at each element.
+    lazy val one: Parser[Option[T]] = maybe(p)
+
+    lazy val more: Parser[List[T]] = one >> {
+      case Some(x) => more ^^ (x :: _)
       case None    => success(Nil)
     }
+
+    more
+  }
 
   // --- reached across the grammar's areas -----------------------------------------------
   //
