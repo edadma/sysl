@@ -7,7 +7,9 @@ copy -- correct a mistake there and regenerate, rather than editing this file. V
 `MAJOR.MINOR.PATCH`; while the leading zero stands the language is still moving, and a release may
 change what an existing program means. Where it does, the release says so.
 
-## Unreleased
+## 0.0.110 — 2026-09-08
+
+This is the release that restarts the 0.1.0 burn-in clock, since the branch-inference change alters what compiles.
 
 `sysl emit-ast <file>` prints one file's untyped parse tree as deterministic text -- parse only, no
 analysis and no standard module, so it works on a file that would fail to compile. It is an oracle:
