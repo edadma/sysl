@@ -17,9 +17,10 @@ trait StmtAnalysis extends TypeResolution with AsmAnalysis {
    */
   protected def analyzeValueBlock(stmts: List[Stmt], expected: Option[Type], discarded: Boolean = false): TBlock = {
     pushScope()
-    val tb = inBlock(stmts)(analyzeBlockBody(stmts, expected, discarded))
-    popScope()
-    tb
+    // The scope closes however the block ends, which is what a reading that is *allowed* to fail
+    // needs: a branch tried without an expectation and then abandoned must leave nothing in view.
+    try inBlock(stmts)(analyzeBlockBody(stmts, expected, discarded))
+    finally popScope()
   }
 
   /** Runs a block's statements with that block's own nested functions in view

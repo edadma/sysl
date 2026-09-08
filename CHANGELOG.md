@@ -14,6 +14,18 @@ analysis and no standard module, so it works on a file that would fail to compil
 a second compiler renders its own tree the same way, and `diff` finds where the two parsers disagree.
 `--no-spans` omits every node's source span, for a diff that does not move when a line does.
 
+##### A branch that cannot be read on its own takes its sibling's type
+
+`val xs = if c then mk() else buf()` was refused with *"cannot infer the type argument 'T' of
+'sysl.buf.buf'"*, while the same `if` as a function's declared result compiled -- the branches were
+read against an expected type and never against each other. A bare literal already took its sibling's
+type, but a nullary generic call is not recognisable as adaptable from the syntax: it is known only
+by being tried. So a branch with nothing to go on is now tried, and one that cannot stand alone is
+held over until a sibling has settled something -- in either order, and for a `match` arm as well as
+an `if` branch. Where neither branch can be read alone the refusal is the one it always was.
+
+##### Every node a rule builds carries a position of its own
+
 A diagnostic about `true`, `false`, `null`, `()` or `self` now points at the one that is wrong rather
 than at the first one written in the file, and the nodes an interpolated string and an `elif` chain
 desugar to carry positions at all. The literal rules built their node once and handed the same object
