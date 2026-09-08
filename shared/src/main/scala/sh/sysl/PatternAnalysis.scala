@@ -17,13 +17,16 @@ trait PatternAnalysis extends TypeResolution {
 
   private def analyzeArmAt(scrutTy: Type, arm: MatchArm, expected: Option[Type], discarded: Boolean): TArm = {
     pushScope()
-    val tpats = arm.patterns.map(analyzePattern(_, scrutTy))
-    if tpats.length > 1 && tpats.exists(binds) then
-      err("alternative patterns joined by '|' cannot bind a name")
-    val tguard = arm.guard.map(analyzeBool)
-    val tbody  = analyzeBlockBody(arm.body, expected, discarded)
-    popScope()
-    TArm(tpats, tguard, tbody)
+    // The arm's scope closes however the arm ends, so an arm read speculatively — tried without an
+    // expectation, to find out whether it can stand alone — leaves none of its bindings behind.
+    try
+      val tpats = arm.patterns.map(analyzePattern(_, scrutTy))
+      if tpats.length > 1 && tpats.exists(binds) then
+        err("alternative patterns joined by '|' cannot bind a name")
+      val tguard = arm.guard.map(analyzeBool)
+      val tbody  = analyzeBlockBody(arm.body, expected, discarded)
+      TArm(tpats, tguard, tbody)
+    finally popScope()
   }
 
   /** The names **this** pattern has bound so far, and whether one is already being walked.

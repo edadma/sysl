@@ -14,6 +14,16 @@ analysis and no standard module, so it works on a file that would fail to compil
 a second compiler renders its own tree the same way, and `diff` finds where the two parsers disagree.
 `--no-spans` omits every node's source span, for a diff that does not move when a line does.
 
+##### A branch that cannot be read on its own takes its sibling's type
+
+`val xs = if c then mk() else buf()` was refused with *"cannot infer the type argument 'T' of
+'sysl.buf.buf'"*, while the same `if` as a function's declared result compiled -- the branches were
+read against an expected type and never against each other. A bare literal already took its sibling's
+type, but a nullary generic call is not recognisable as adaptable from the syntax: it is known only
+by being tried. So a branch with nothing to go on is now tried, and one that cannot stand alone is
+held over until a sibling has settled something -- in either order, and for a `match` arm as well as
+an `if` branch. Where neither branch can be read alone the refusal is the one it always was.
+
 ## 0.0.109 — 2026-09-07
 
 `slate` (95,757 lines, the largest sysl program there is) now builds under a `GC_MAXIMUM_HEAP_SIZE=20g` cap, at a 19.0 GB peak, down from 36.9 GB in 0.0.108 -- and a hello-world finishes inside `1g`, down from `3g`.

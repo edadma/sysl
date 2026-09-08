@@ -60,15 +60,58 @@ trait ControlFlowExprAnalysis extends ExprSupport {
       // (`reference/expressions.md § is — a pattern where a condition is wanted`). The `else` is
       // analyzed outside it, and so is an `elif` — the parser nests one into the else branch, so it
       // is already on the other side of this `popScope` and cannot read a name the test bound.
-      pushScope()
-      val tc    = analyzeCond(cond)
-      val tThen = analyzeValueBlock(thenBody, expected.orElse(early.flatMap(settles)), discarded)
-      popScope()
-      val tElse = early.orElse(elseOpt.map(analyzeValueBlock(
-        _,
-        expected.orElse(if elseGuesses && !thenGuesses then settles(tThen) else None),
-        discarded,
-      )))
+      //
+      // It is taken as a function because the *then* side may have to be read twice: once to find
+      // out whether it can stand alone, and once for real with what the `else` settled. The scope
+      // closes either way, including on the reading that failed.
+      def thenSide(want: Option[Type]): (List[TCondTerm], TBlock) = {
+        pushScope()
+        try (analyzeCond(cond), analyzeValueBlock(thenBody, want, discarded))
+        finally popScope()
+      }
+
+      val thenWants = expected.orElse(early.flatMap(settles))
+
+      // **A branch may have no type of its own for a reason `guessing` cannot see, and the sibling
+      // rule is owed to that branch too.** A bare literal is the case that tier was written for: it
+      // is recognised from the syntax, before anything is analyzed. A nullary generic call is the
+      // other one and is invisible until it is tried — `buf()` has nothing in its argument list to
+      // fix `T`, so it is solved from the expected type (`reference/generics.md § Inference is
+      // bidirectional`) and simply fails where there is none. Under a declared result the `if`
+      // already worked, because the result was that expectation; standing on its own it was refused
+      // for a type the branch beside it knew all along.
+      //
+      // So a branch with nothing to go on is *tried*, and a branch that cannot stand alone is held
+      // over until its sibling has spoken — which is what `analyzeOperands` does with an operand
+      // that has no reading of its own, for the cost of one analysis rather than two. **Only a
+      // branch that failed is told anything**: a reading that succeeded is kept exactly as it was,
+      // registrations and all, so nothing that resolves today resolves differently.
+      val (tc, tThen, settledElse) =
+        if thenWants.isDefined || elseOpt.isEmpty then
+          val (c, t) = thenSide(thenWants)
+          (c, t, None)
+        else
+          attempt(thenSide(None)) match
+            case Some((c, t)) => (c, t, None)
+            case None         =>
+              // The `else` leads, exactly as it does for a guessing *then* above. Where it cannot
+              // stand alone either, neither branch settles anything and the second reading of the
+              // *then* raises what the first one swallowed — the same words, at the branch the
+              // reader wrote first.
+              val sibling = elseOpt.flatMap(b => attempt(analyzeValueBlock(b, None, discarded)))
+              val (c, t)  = thenSide(sibling.flatMap(settles))
+              (c, t, sibling)
+
+      val tElse = early.orElse(settledElse).orElse(elseOpt.map { b =>
+        val want = expected.orElse(if elseGuesses && !thenGuesses then settles(tThen) else None)
+
+        // The other order, and it needs the same held-over reading: with the *then* branch the one
+        // that knows, an `else` that cannot stand alone takes what the *then* settled.
+        if want.isDefined then analyzeValueBlock(b, want, discarded)
+        else
+          attempt(analyzeValueBlock(b, None, discarded))
+            .getOrElse(analyzeValueBlock(b, settles(tThen), discarded))
+      })
       // The branches meet at one type, and a branch that does not finish takes the other's. A
       // branch used only for its effect is a different thing: one `unit` branch makes the whole
       // `if` a statement, whose value is nobody's, exactly as a missing `else` does.
@@ -579,9 +622,14 @@ trait ControlFlowExprAnalysis extends ExprSupport {
    * reading of every one of them is the same either way. The list is put back in source order
    * before it leaves, because exhaustiveness is a question about the arms as written.
    *
-   * **The whole thing stands aside unless the match is genuinely mixed.** With a type already
-   * expected, with every arm guessing, or with none of them guessing, there is nothing for one arm
-   * to tell another and the arms are analyzed exactly as they were.
+   * **The whole thing stands aside where the position already supplies a type.** With one expected
+   * there is nothing for an arm to tell another and every arm is analyzed exactly as it was.
+   *
+   * An arm has no type of its own for either of the two reasons a branch does: it is a bare literal,
+   * which is read from the syntax, or it is a call whose type arguments only the expected type can
+   * fix, which is invisible until the arm is tried. So an arm that is not guessing is *tried*, and
+   * one that cannot stand alone is held over with the guessing ones until a sibling has settled
+   * something.
    */
   private def analyzeArms(
       scrutTy: Type,
@@ -589,21 +637,17 @@ trait ControlFlowExprAnalysis extends ExprSupport {
       expected: Option[Type],
       discarded: Boolean,
   ): List[TArm] = {
-    val guesses = arms.map(a => guessing(a.body))
-
-    if expected.isDefined || !guesses.contains(true) || !guesses.contains(false) then
-      arms.map(analyzeArm(scrutTy, _, expected, discarded))
+    if expected.isDefined then arms.map(analyzeArm(scrutTy, _, expected, discarded))
     else
-      val known = arms.zipWithIndex.collect {
-        case (a, i) if !guesses(i) => i -> analyzeArm(scrutTy, a, None, discarded)
-      }
-      // The first arm that settles anything is what the guessing ones are told. Where the arms that
+      val own = arms.map(a =>
+        if guessing(a.body) then None else attempt(analyzeArm(scrutTy, a, None, discarded)))
+
+      // The first arm that settles anything is what the held-over ones are told. Where the arms that
       // know disagree among themselves this picks one of them, and `matchResultType` then reports
       // that disagreement — which is the complaint the reader is owed, rather than one about an
       // arm that only ever repeated what it was handed.
-      val want = known.flatMap((_, t) => settles(t.body)).headOption
-      val told = known.toMap
+      val want = own.flatten.flatMap(t => settles(t.body)).headOption
 
-      arms.zipWithIndex.map((a, i) => told.getOrElse(i, analyzeArm(scrutTy, a, want, discarded)))
+      arms.zip(own).map((a, t) => t.getOrElse(analyzeArm(scrutTy, a, want, discarded)))
   }
 }

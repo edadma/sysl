@@ -333,4 +333,219 @@ class BranchTypingTests extends AnyFreeSpec with RunSupport with CodegenSupport 
       run(src) shouldBe "1 true\n"
     }
   }
+
+  /** A **nullary generic call** is the third form with no type of its own, and it is the one neither
+    * tier above can recognise from the syntax.
+    *
+    * `buf()` has nothing in its argument list to fix `T`, so it is solved from the expected type
+    * (`reference/generics.md § Inference is bidirectional`) and simply fails where there is none.
+    * Under a declared result the `if` already compiled, because the result *was* that expectation;
+    * standing on its own it was refused — *"cannot infer the type argument 'T' of 'sysl.buf.buf'"* —
+    * for a type the branch beside it knew all along, and the annotation it asked for restated what
+    * the other branch already returns.
+    *
+    * The reading is what tells the forms apart: a bare literal is known to be adaptable before
+    * anything is analyzed, and a call is known only by being tried. So a branch with nothing to go
+    * on is tried, and one that cannot stand alone is held over until its sibling has spoken.
+    */
+  "a branch that cannot be read alone takes its sibling's type" - {
+    "the else branch, which is the order it was reported in" in {
+      val src =
+        """import sysl.buf.*
+          |
+          |mk() -> Buf[int]
+          |    var b: Buf[int] = buf()
+          |    b.push(7)
+          |    b
+          |
+          |f(c: bool) -> usize
+          |    var xs = if c then mk() else buf()
+          |    xs.push(1)
+          |    xs.len()
+          |
+          |print(f(true), f(false))
+          |""".stripMargin
+
+      run(src) shouldBe "2 1\n"
+    }
+
+    // The other order, which is the one that needs the *then* branch read a second time: it is
+    // analyzed first, fails for want of an expectation, and is re-read with what the `else` settled.
+    "the then branch, which is read twice" in {
+      val src =
+        """import sysl.buf.*
+          |
+          |mk() -> Buf[int]
+          |    var b: Buf[int] = buf()
+          |    b.push(7)
+          |    b
+          |
+          |f(c: bool) -> usize
+          |    var xs = if c then buf() else mk()
+          |    xs.push(1)
+          |    xs.len()
+          |
+          |print(f(true), f(false))
+          |""".stripMargin
+
+      run(src) shouldBe "1 2\n"
+    }
+
+    // Nothing about it is `buf`'s: the rule is asked of the declaration, so an ordinary nullary
+    // generic written in the program behaves the same way.
+    "a nullary generic written in the program, not only a library one" in {
+      val src =
+        """empty[T]() -> Option[T] = None
+          |
+          |f(c: bool) -> Option[int]
+          |    val b = if c then Some(3) else empty()
+          |    b
+          |
+          |print(f(true).unwrap(), f(false).is_none())
+          |""".stripMargin
+
+      run(src) shouldBe "3 true\n"
+    }
+
+    "and with the generic branch written first" in {
+      val src =
+        """empty[T]() -> Option[T] = None
+          |
+          |f(c: bool) -> Option[int]
+          |    val b = if c then empty() else Some(3)
+          |    b
+          |
+          |print(f(false).unwrap(), f(true).is_none())
+          |""".stripMargin
+
+      run(src) shouldBe "3 true\n"
+    }
+
+    // An `elif` nests into the `else` branch, so the settling has to reach through one `if` into the
+    // next — the branch that knows is in the middle here and the two that do not are on either side.
+    "an elif chain settles from the branch in the middle" in {
+      val src =
+        """empty[T]() -> Option[T] = None
+          |
+          |f(n: int) -> Option[int]
+          |    val b = if n == 0 then empty() elif n == 1 then Some(9) else empty()
+          |    b
+          |
+          |print(f(1).unwrap(), f(0).is_none(), f(2).is_none())
+          |""".stripMargin
+
+      run(src) shouldBe "9 true true\n"
+    }
+
+    "a match arm is the same rule over as many alternatives as the form has" in {
+      val src =
+        """empty[T]() -> Option[T] = None
+          |
+          |pick(n: int) -> Option[int]
+          |    val b = n match
+          |        0 -> empty()
+          |        _ -> Some(n)
+          |    b
+          |
+          |print(pick(0).is_none(), pick(5).unwrap())
+          |""".stripMargin
+
+      run(src) shouldBe "true 5\n"
+    }
+
+    // The arm that knows may be written first as well as last, which is what the held-over reading
+    // buys over analyzing the arms in source order and stopping at the first refusal.
+    "and a match arm settled by an arm written before it" in {
+      val src =
+        """empty[T]() -> Option[T] = None
+          |
+          |pick(n: int) -> Option[int]
+          |    val b = n match
+          |        0 -> Some(n)
+          |        _ -> empty()
+          |    b
+          |
+          |print(pick(0).unwrap(), pick(5).is_none())
+          |""".stripMargin
+
+      run(src) shouldBe "0 true\n"
+    }
+
+    // What has NOT moved, and the rule is worth nothing without it: with neither branch able to
+    // stand alone there is nothing to settle it, and the refusal is the one it always was.
+    "two branches that neither can be read alone give the same diagnostic" in {
+      err("""import sysl.buf.*
+            |
+            |f(c: bool)
+            |    val xs = if c then buf() else buf()
+            |    print(xs.len())
+            |""".stripMargin) should include("cannot infer the type argument")
+    }
+
+    "and so do two arms" in {
+      err("""empty[T]() -> Option[T] = None
+            |
+            |f(n: int)
+            |    val b = n match
+            |        0 -> empty()
+            |        _ -> empty()
+            |    print(b.is_none())
+            |""".stripMargin) should include("cannot infer the type argument")
+    }
+
+    // A branch read speculatively and abandoned must leave nothing of its own behind, its **scope**
+    // included: the reading that failed declared `inner`, and the line after the `if` may not see
+    // it. Without the block closing its scope on the way out, the abandoned scope stays on the
+    // stack and `print(inner)` resolves against a binding of a branch that was thrown away — which
+    // compiles, so the seam is that this program is refused at all.
+    "a branch tried and abandoned closes its scope on the way out" in {
+      err("""import sysl.buf.*
+            |
+            |mk() -> Buf[int]
+            |    var b: Buf[int] = buf()
+            |    b.push(7)
+            |    b
+            |
+            |f(c: bool) -> usize
+            |    var xs =
+            |        if c then
+            |            mk()
+            |        else
+            |            val inner = 1
+            |            buf()
+            |    print(inner)
+            |    xs.len()
+            |
+            |print(f(true))
+            |""".stripMargin) should include("inner")
+    }
+
+    "and so does an arm" in {
+      err("""empty[T]() -> Option[T] = None
+            |
+            |f(n: int) -> Option[int]
+            |    val b = n match
+            |        0 ->
+            |            val inner = 1
+            |            empty()
+            |        _ -> Some(n)
+            |    print(inner)
+            |    b
+            |
+            |print(f(0).is_none())
+            |""".stripMargin) should include("inner")
+    }
+
+    // Two branches that each know what they are still have to agree, and the complaint is still the
+    // one about the pair rather than one about a branch read at the other's type.
+    "two branches that each know their type still disagree in the same words" in {
+      err("""import sysl.buf.*
+            |
+            |f(c: bool, n: usize)
+            |    var b: Buf[int] = buf()
+            |    val w = if c then b else n
+            |    print(w)
+            |""".stripMargin) should include("if branches have different types")
+    }
+  }
 }
