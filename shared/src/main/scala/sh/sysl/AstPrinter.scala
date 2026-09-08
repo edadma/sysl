@@ -115,23 +115,44 @@ object AstPrinter {
 
     def top(program: Program): Unit = renderNode(program, "")
 
-    /** A node's own type name, off its runtime class — `getSimpleName` names a `case object` (a
-     * parameterless enum case among them: `RecvMode.ByValue`, `AsmDir.In`) with a trailing `$`,
-     * which is stripped so `WildcardPattern$` reads as `WildcardPattern`.
+    /** A node's own type name.
      *
-     * **A parameterless `enum` case — `Visibility.Public`, `AsmDir.In`, every `HookKind` — compiles
-     * to an anonymous class**, whose `getSimpleName` the JVM defines as `""` rather than anything
-     * naming the case. Scala 3 gives every enum case a `toString` equal to its own name for exactly
-     * this reason, so that is the fallback, taken only when the reflected name is empty — a real
-     * case class or case object always has one, and `toString` is never asked of those, which is
-     * what keeps this from printing `IntLit(1,None)` in place of `IntLit`.
+     * **The tree's five `enum`s are matched by hand, and this is not the generic case rescued by a
+     * fallback — it is the only reliable route.** A parameterless case — `Visibility.Public`,
+     * `AsmDir.In`, every `HookKind` — compiles to an anonymous class, so `getClass.getSimpleName`
+     * answers `""` for it on every backend; a case *with* fields (`Visibility.Scoped`,
+     * `RecvMode.ByRef`) does carry a name, but not always the same string, and Scala 3's own
+     * `toString` for a case with none is not a reflection substitute either — it agrees with the
+     * case's name on the JVM and on Scala.js and answers the case's **ordinal** (`"1"` for
+     * `Visibility.Public`) on Scala Native. Caught by the golden test above, which is exact enough to
+     * fail on every `vis: Public` field turning into `vis: 1` under `syslNative/test` and nowhere
+     * else — the tell that this was a backend difference and not a logic error, since the same code
+     * ran unchanged on all three.
+     *
+     * Every other node is a real case class or case object, whose `getSimpleName` names it plainly
+     * and identically everywhere — `IntLit`, `WildcardPattern` (stripped of the trailing `$` a case
+     * object's own carries) — which is what keeps this reflective for the roughly 125 kinds that
+     * need nothing more.
      */
-    private def tag(v: Any): String = {
-      val name = v.getClass.getSimpleName
-      val bare = if name.endsWith("$") then name.dropRight(1) else name
+    private def tag(v: Any): String = v match
+      case Visibility.Public               => "Public"
+      case Visibility.File                 => "File"
+      case _: Visibility.Scoped            => "Scoped"
+      case RecvMode.ByValue                => "ByValue"
+      case RecvMode.ByPtr                  => "ByPtr"
+      case _: RecvMode.ByRef               => "ByRef"
+      case AsmDir.In                       => "In"
+      case AsmDir.Out                      => "Out"
+      case HookKind.Setup                  => "Setup"
+      case HookKind.Teardown               => "Teardown"
+      case HookKind.SetupAll               => "SetupAll"
+      case HookKind.TeardownAll            => "TeardownAll"
+      case CapabilityDirection.Narrows     => "Narrows"
+      case CapabilityDirection.Requires    => "Requires"
+      case _ =>
+        val name = v.getClass.getSimpleName
 
-      if bare.nonEmpty then bare else v.toString
-    }
+        if name.endsWith("$") then name.dropRight(1) else name
 
     private def span(p: Positioned): String =
       if !spans then ""

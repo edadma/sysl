@@ -266,6 +266,80 @@ class AstPrinterTests extends AnyFreeSpec with Matchers {
     }
   }
 
+  // Regression for a real cross-platform bug (`AstPrinter.tag`'s own comment has the story): a
+  // parameterless `enum` case's Scala 3 `toString` agrees with its name on the JVM and on Scala.js
+  // and answers its **ordinal** on Scala Native, so `vis: Public` printed as `vis: 1` under
+  // `syslNative/test` alone. Found by the golden test above going red on exactly one platform with
+  // exactly the same code — these five pin every case of every one of the tree's `enum`s by name, so
+  // a reflective shortcut re-introduced here fails on the JVM as loudly as it fails on Native.
+  "the five enums the tree carries print every case by name" - {
+
+    "Visibility: Public, File, Scoped" in {
+      val program = Program(
+        List(
+          VarDecl("a", None, None, Visibility.Public),
+          VarDecl("b", None, None, Visibility.File),
+          VarDecl("c", None, None, Visibility.Scoped("m")),
+        ),
+        None, Nil, Nil, Source("<t>", ""))
+      val printed = AstPrinter.print(program, spans = false)
+
+      printed should include("vis: Public")
+      printed should include("vis: File")
+      printed should include("vis: Scoped")
+      printed should include("module: \"m\"")
+      printed should not include "vis: 1"
+      printed should not include "vis: 2"
+    }
+
+    "RecvMode: ByValue, ByPtr, ByRef" in {
+      val members = List(
+        MethodDecl("a", Some(RecvMode.ByValue), false, Nil, Nil, None, Nil),
+        MethodDecl("b", Some(RecvMode.ByPtr), false, Nil, Nil, None, Nil),
+        MethodDecl("c", Some(RecvMode.ByRef(true)), false, Nil, Nil, None, Nil),
+      )
+      val program = Program(List(StructDecl("S", Nil, Nil, members)), None, Nil, Nil, Source("<t>", ""))
+      val printed = AstPrinter.print(program, spans = false)
+
+      printed should include("ByValue")
+      printed should include("ByPtr")
+      printed should include("ByRef")
+      printed should include("sync: true")
+    }
+
+    "AsmDir: In, Out" in {
+      val arm = AsmArm(List("x86_64"),
+        AsmCode(Nil, List(AsmOperand(AsmDir.In, "a", None), AsmOperand(AsmDir.Out, "b", None)), Nil))
+      val program = Program(List(AsmStmt(List(arm))), None, Nil, Nil, Source("<t>", ""))
+      val printed = AstPrinter.print(program, spans = false)
+
+      printed should include regex "dir: In\\b"
+      printed should include regex "dir: Out\\b"
+    }
+
+    "HookKind: Setup, Teardown, SetupAll, TeardownAll" in {
+      val kinds = List(HookKind.Setup, HookKind.Teardown, HookKind.SetupAll, HookKind.TeardownAll)
+      val decls = kinds.zipWithIndex.map((k, i) => FuncDecl(s"f$i", Nil, Nil, None, Nil, hook = Some(HookAttr(k))))
+      val printed = AstPrinter.print(Program(decls, None, Nil, Nil, Source("<t>", "")), spans = false)
+
+      printed should include("Setup")
+      printed should include("Teardown")
+      printed should include("SetupAll")
+      printed should include("TeardownAll")
+    }
+
+    "CapabilityDirection: Narrows, Requires" in {
+      val clauses = List(
+        CapabilityClause(CapabilityDirection.Narrows, "alloc"),
+        CapabilityClause(CapabilityDirection.Requires, "os"),
+      )
+      val printed = AstPrinter.print(Program(Nil, None, clauses, Nil, Source("<t>", "")), spans = false)
+
+      printed should include("Narrows")
+      printed should include("Requires")
+    }
+  }
+
   "a parse error" - {
 
     "exits non-zero, prints the ordinary diagnostic on stderr, and prints nothing on stdout" in {
