@@ -450,8 +450,14 @@ trait ExprParser extends SyslParserBase {
 
   /** `self` is reserved, so it never lexes as an identifier; inside a method body it reads as an
    * ordinary name that the analyzer resolves to the receiver binding, and is undefined elsewhere.
+   *
+   * **`^^` rather than `^^^`, and every constant-yielding rule below is written the same way for
+   * the same reason.** `^^^` evaluates its argument once and hands the *same* object back on every
+   * application, so one `Ident("self")` would serve every `self` in the file — and since `setPos`
+   * keeps the first position it is given, every one of them would report where the first was
+   * written. A function makes a node per parse, which is what a position belongs to.
    */
-  protected lazy val selfExpr: Parser[Expr] = op("self") ^^^ Ident("self")
+  protected lazy val selfExpr: Parser[Expr] = op("self") ^^ (_ => Ident("self"))
 
   /** `[a, b, c]` — an array literal, or `[v; n]` — an array of `n` copies of one value. A leading
    * `[` is unambiguous in operand position, since a subscript is a postfix tail on something
@@ -469,7 +475,7 @@ trait ExprParser extends SyslParserBase {
    * product. A tuple is lifted whole, since the parentheses that delimit it are the same ones.
    */
   protected lazy val parenTail: PackratParser[Expr] =
-    op(")") ^^^ UnitLit() |
+    op(")") ^^ (_ => UnitLit()) |
       expression ~ rep(op(",") ~> expression) <~ op(")") ^^ {
         case e ~ Nil  => Placeholders.lift(e)
         case e ~ more => Placeholders.lift(Tuple(e :: more).setPos(e.pos))
@@ -498,7 +504,7 @@ trait ExprParser extends SyslParserBase {
   protected lazy val interpLit: Parser[Expr] = Parser { in =>
     in.first match
       case t: lexical.StrInterp =>
-        desugarInterp(t) match
+        desugarInterp(t, spanOf(in, in.rest)) match
           case Right(e) => Success(e, in.rest)
           // A malformed embedded expression has no other reading, so the failure is fatal rather
           // than a cue to backtrack — that keeps the real message instead of a generic one from
@@ -507,7 +513,19 @@ trait ExprParser extends SyslParserBase {
       case _ => Failure("string interpolation expected", in)
   }
 
-  protected def desugarInterp(t: lexical.StrInterp): Either[String, Expr] = {
+  /** The concatenation an interpolated string stands for, with every node in it positioned.
+   *
+   * **Nothing here is written in the source, so nothing here would have a position unless one is
+   * given.** Only the outermost node of a rule's result is stamped, by `at` around `primary`, so a
+   * chain built out of a dozen `StrLit`s, `Ident`s, `Call`s and `Binary`s would carry exactly one
+   * span and the rest would report nowhere — which is how an analyzer complaint about a hole's type
+   * ends up with no caret at all. The span they are all given is `whole`, the literal itself: it is
+   * what the reader wrote and what they would edit, and the tree holds no finer position for a part
+   * of a token. Nodes the *sub-parse* built keep their own positions, which point into the hole.
+   */
+  protected def desugarInterp(t: lexical.StrInterp, whole: Pos): Either[String, Expr] = {
+    def here[T <: Positioned](node: T): T = node.setPos(whole)
+
     val parsed =
       t.exprs.foldRight(Right(Nil): Either[String, List[Expr]]) { (src, acc) =>
         for
@@ -519,25 +537,25 @@ trait ExprParser extends SyslParserBase {
     // A plain hole renders through `str`; a hole with a specifier renders through `format`, which
     // carries the specifier as a literal for the analyzer to check against the value's type.
     def render(e: Expr, spec: Option[String]): Expr = spec match
-      case None       => Call(Ident("str"), List(e))
-      case Some(fmt)  => Call(Ident("format"), List(e, StrLit(fmt)))
+      case None      => here(Call(here(Ident("str")), List(e)))
+      case Some(fmt) => here(Call(here(Ident("format")), List(e, here(StrLit(fmt)))))
 
     parsed.map { exprs =>
       val terms =
         t.parts.head match
           case "" => List.empty[Expr]
-          case p  => List(StrLit(p): Expr)
+          case p  => List(here(StrLit(p)): Expr)
 
       val holes = exprs.lazyZip(t.parts.tail).lazyZip(t.specs)
 
       val rendered = holes.foldLeft(terms) { case (acc, (e, part, spec)) =>
         val withExpr = acc :+ render(e, spec)
-        if part.isEmpty then withExpr else withExpr :+ StrLit(part)
+        if part.isEmpty then withExpr else withExpr :+ here(StrLit(part))
       }
 
       rendered match
-        case Nil     => StrLit("")
-        case x :: xs => xs.foldLeft(x)((l, r) => Binary("+", l, r))
+        case Nil     => here(StrLit(""))
+        case x :: xs => xs.foldLeft(x)((l, r) => here(Binary("+", l, r)))
     }
   }
 
@@ -563,9 +581,9 @@ trait ExprParser extends SyslParserBase {
   }
 
   protected lazy val boolLit: Parser[Expr] =
-    op("true") ^^^ BoolLit(true) | op("false") ^^^ BoolLit(false)
+    op("true") ^^ (_ => BoolLit(true)) | op("false") ^^ (_ => BoolLit(false))
 
-  protected lazy val nullLit: Parser[Expr] = op("null") ^^^ NullLit()
+  protected lazy val nullLit: Parser[Expr] = op("null") ^^ (_ => NullLit())
 
   protected lazy val identExpr: Parser[Expr] = ident ^^ Ident.apply
 

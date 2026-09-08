@@ -16,11 +16,19 @@ trait ControlFlowParser extends StmtParser {
   /** `if cond then a else b` — an expression. Its branches are statement lists whose trailing
    * expression is the branch value; `elif` nests into the else branch, and the `else` is
    * optional (a missing one gives an open branch that only the analyzer's unit rule allows).
+   *
+   * **The nested `if` an `elif` becomes is positioned at its own keyword.** Only the outermost node
+   * is stamped by the rule around this one, so a chain built here would leave every `elif` but the
+   * first pointing nowhere — and a complaint about a branch would arrive with no caret. Each clause
+   * carries the span of the `elif` that introduced it, which is where the reader would look.
    */
   protected lazy val ifExpr: PackratParser[Expr] =
     op("if") ~> expression ~ body("then") ~ rep(elifClause) ~ opt(elseClause) ~ opt(endMarker("if")) ^^ {
       case c ~ t ~ elifs ~ e ~ _ =>
-        val elseChain = elifs.foldRight(e) { case ((ec, eb), acc) => Some(List(ExprStmt(IfExpr(ec, eb, acc)))) }
+        val elseChain = elifs.foldRight(e) { case ((kw, ec, eb), acc) =>
+          Some(List(ExprStmt(IfExpr(ec, eb, acc).setPos(kw)).setPos(kw)))
+        }
+
         IfExpr(c, t, elseChain)
     }
 
@@ -37,9 +45,14 @@ trait ControlFlowParser extends StmtParser {
 
   /** `elif cond then …` is sugar for `else if cond then …` — each one nests into the else
    * branch of the previous, so no distinct AST node is needed.
+   *
+   * The keyword's own span comes out with the parts, because the node it stands for is built by
+   * [[ifExpr]] after every later clause has been read.
    */
-  protected lazy val elifClause: Parser[(Expr, List[Stmt])] =
-    onNextLine(op("elif")) ~> expression ~ body("then") ^^ { case c ~ b => (c, b) }
+  protected lazy val elifClause: Parser[(Pos, Expr, List[Stmt])] =
+    onNextLine(withSpan(op("elif"))) ~ expression ~ body("then") ^^ {
+      case (kw, _) ~ c ~ b => (kw, c, b)
+    }
 
   /** `else` sits on a fresh line after a block body, or on the same line after an inline
    * one — so any intervening `Newline` is optional.

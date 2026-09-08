@@ -21,13 +21,17 @@ import org.scalatest.freespec.AnyFreeSpec
  */
 class DiagnosticPositionTests extends AnyFreeSpec with CodegenSupport {
 
-  /** The 1-based column the caret points at in the source line above it. */
-  private def column(src: String): Int = {
+  /** The 1-based line and column the caret points at. */
+  private def location(src: String): (Int, Int) = {
     val rendered = err(src)
     val loc      = rendered.linesIterator.find(_.trim.startsWith("-->")).getOrElse(fail(rendered))
+    val parts    = loc.trim.split(":").takeRight(2)
 
-    loc.trim.split(":").last.toInt
+    (parts(0).toInt, parts(1).toInt)
   }
+
+  /** The 1-based column the caret points at in the source line above it. */
+  private def column(src: String): Int = location(src)._2
 
   "a message naming a member points at the member" - {
 
@@ -83,6 +87,26 @@ class DiagnosticPositionTests extends AnyFreeSpec with CodegenSupport {
     // route and would not have moved on its own.
     "and through a compound assignment, at the value" in {
       column("var n = 1\nn += \"x\"") shouldBe 6
+    }
+  }
+
+  /** A literal keyword is not one node the whole file shares.
+   *
+   * `op("true") ^^^ BoolLit(true)` builds the node once and hands the same object back for every
+   * `true` the process ever parses; the first one to be given a position keeps it, so a complaint
+   * about the hundredth `true` in a file pointed at the first. The caret went to an earlier line
+   * that is not wrong, which reads as the compiler having found a different mistake than it did.
+   */
+  "a literal keyword is complained about where it is written, not where its first twin is" - {
+
+    "the second 'true' in a file" in {
+      location("val ok = true\nprint(1 + true)") shouldBe (2, 11)
+    }
+
+    // The first `null` needs a pointer to take its type from, since a bare one is a mistake in its
+    // own right and would be the diagnostic this asserts about.
+    "the second 'null'" in {
+      location("var p: *int = null\nprint(1 + null)") shouldBe (2, 11)
     }
   }
 

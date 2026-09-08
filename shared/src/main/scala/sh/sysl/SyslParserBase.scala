@@ -219,6 +219,26 @@ trait SyslParserBase extends PackratParsers {
     }
   }
 
+  /** `p`'s result paired with the span it consumed, for a rule that has to position something it
+   * builds **later**.
+   *
+   * [[at]] answers the ordinary case, where the rule that reads the tokens is the rule that builds
+   * the node. It cannot answer a rule that reads a clause and hands its parts to a fold — an `elif`,
+   * whose nested `if` cannot be built until the branches after it are known — because by then the
+   * input the clause was read at is gone. Carrying the span out with the parts is what lets the node
+   * that stands for the clause point at the clause.
+   */
+  protected def withSpan[T](p: => Parser[T]): Parser[(Pos, T)] = {
+    lazy val q = p
+
+    Parser { in =>
+      q(in) match {
+        case Success(t, rest) => Success((spanOf(in, rest), t), rest)
+        case ns: NoSuccess    => ns
+      }
+    }
+  }
+
   /** Renames the failure `p` reports when it fails **without consuming anything**, so the reader is
    * told what was wanted rather than which candidate the grammar happened to try last.
    *

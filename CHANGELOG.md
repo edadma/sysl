@@ -14,6 +14,13 @@ analysis and no standard module, so it works on a file that would fail to compil
 a second compiler renders its own tree the same way, and `diff` finds where the two parsers disagree.
 `--no-spans` omits every node's source span, for a diff that does not move when a line does.
 
+A diagnostic about `true`, `false`, `null`, `()` or `self` now points at the one that is wrong rather
+than at the first one written in the file, and the nodes an interpolated string and an `elif` chain
+desugar to carry positions at all. The literal rules built their node once and handed the same object
+back for every occurrence, and the first position it was given stuck; the desugared concatenation and
+the nested `if` an `elif` becomes were built after the tokens they stand for had been read, so
+nothing positioned them.
+
 ## 0.0.109 — 2026-09-07
 
 `slate` (95,757 lines, the largest sysl program there is) now builds under a `GC_MAXIMUM_HEAP_SIZE=20g` cap, at a 19.0 GB peak, down from 36.9 GB in 0.0.108 -- and a hello-world finishes inside `1g`, down from `3g`.

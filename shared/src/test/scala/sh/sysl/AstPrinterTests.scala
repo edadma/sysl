@@ -82,6 +82,126 @@ class AstPrinterTests extends AnyFreeSpec with Matchers {
     }
   }
 
+  /** Every node the grammar builds points at the source it was built from — which is a property of
+   * the **parser** rather than of the printer, and is read here because a printed tree with spans on
+   * is the one place the whole of it is visible at once.
+   *
+   * Two ways of losing a position are pinned, and neither shows up in what a program *means*:
+   *
+   *   - **A constant node shared between parses.** `^^^` evaluates its right side once, so a rule
+   *     written `op("true") ^^^ BoolLit(true)` hands the same object back for every `true` in the
+   *     process — and `setPos` keeps the first claim, so all of them report the first one's line.
+   *   - **A node nothing in the source stands one-to-one for.** An interpolated string is a
+   *     concatenation and an `elif` is a nested `if`, and neither is a token the enclosing rule's
+   *     `at` reaches: only the outermost node of a rule's result is stamped.
+   */
+  "every node a rule builds carries its own position" - {
+
+    /** The lines a node of one kind was reported on, in the order they print. */
+    def linesOf(kind: String, src: String): List[Int] =
+      (kind + """ (\d+):\d+-\d+:\d+""").r
+        .findAllMatchIn(AstPrinter.print(parsed(src), spans = true))
+        .map(_.group(1).toInt)
+        .toList
+
+    /** Node header lines printed with no span at all — the type name and nothing else.
+     *
+     * A field prints as `name: value`, and a node in a list prints under a `- `, so a bare
+     * capitalised word on a line of its own is a node that was asked for its position and had none.
+     * `Program` is the one legitimate answer: it is the file rather than anything in it, and carries
+     * no position by design. Patterns carry none either, which is why no fixture here holds one.
+     */
+    def positionless(src: String): List[String] =
+      AstPrinter
+        .print(parsed(src), spans = true)
+        .linesIterator
+        .map(_.trim.stripPrefix("- "))
+        .filter(_.matches("[A-Z][A-Za-z0-9]*"))
+        .filterNot(_ == "Program")
+        .toList
+
+    "two 'true' literals on different lines each report their own line" in {
+      linesOf("BoolLit", "val a = true\nval b = false\nval c = true\n") shouldBe List(1, 2, 3)
+    }
+
+    "and the span is the literal itself, not merely the right line" in {
+      val printed = AstPrinter.print(parsed("val a = true\nval b = true\n"), spans = true)
+
+      printed should include("BoolLit 1:9-1:13")
+      printed should include("BoolLit 2:9-2:13")
+    }
+
+    "so do two 'null's" in {
+      linesOf("NullLit", "val a = null\nval b = null\nval c = null\n") shouldBe List(1, 2, 3)
+    }
+
+    "so do two '()'s" in {
+      linesOf("UnitLit", "val a = ()\nval b = ()\n") shouldBe List(1, 2)
+    }
+
+    "and two 'self's, in different methods" in {
+      val src =
+        """struct S
+          |    n: int
+          |
+          |    a(self) -> int = self.n
+          |    b(self) -> int = self.n
+          |end S
+          |""".stripMargin
+
+      val selfs =
+        """Ident (\d+):\d+-\d+:\d+\n\s+name: "self"""".r
+          .findAllMatchIn(AstPrinter.print(parsed(src), spans = true))
+          .map(_.group(1).toInt)
+          .toList
+
+      selfs shouldBe List(4, 5)
+    }
+
+    // The concatenation an interpolated string desugars to is built out of `StrLit`s, `Ident`s,
+    // `Call`s and `Binary`s that no rule reads tokens for, so every one of them but the outermost
+    // used to print bare.
+    "an interpolated string's concatenation is positioned throughout" in {
+      val src = "val n = 1\nval s = s\"a${n}b${n}c\"\nval g = f\"${n}%04d\"\n"
+
+      positionless(src) shouldBe empty
+    }
+
+    // Each `elif` is a nested `if` in the else branch of the one before it, and the outer `if` is
+    // the only node the rule's own `at` reaches.
+    "an if/elif/else chain is positioned throughout" in {
+      val src =
+        """f(n: int) -> int =
+          |    if n < 1
+          |        10
+          |    elif n < 2
+          |        20
+          |    elif n < 3
+          |        30
+          |    else
+          |        40
+          |""".stripMargin
+
+      positionless(src) shouldBe empty
+    }
+
+    "and each nested 'if' points at the 'elif' that introduced it" in {
+      val src =
+        """f(n: int) -> int =
+          |    if n < 1
+          |        10
+          |    elif n < 2
+          |        20
+          |    elif n < 3
+          |        30
+          |    else
+          |        40
+          |""".stripMargin
+
+      linesOf("IfExpr", src) shouldBe List(2, 4, 6)
+    }
+  }
+
   "every node kind the tree can hold is reachable" - {
 
     // One instance of every case class/case object in `ast.scala` (`Expr`, 46), `astStmts.scala`

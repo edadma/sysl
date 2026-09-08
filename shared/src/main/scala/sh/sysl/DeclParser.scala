@@ -284,9 +284,11 @@ trait DeclParser extends ExprParser {
         // misindented body from quietly becoming one; a lone `struct Name` is still the mistake it
         // has always been, and still says so below.
         case None ~ Some(_) =>
-          endName(name) ^^^ StructDecl(name, tp.names, Nil, Nil, tp.bounds, Nil,
-                                       tdefaults = tp.defaults, opaque = opaque, tvalues = tp.values,
-                                       deriving = derives)
+          endName(name) ^^ { _ =>
+            StructDecl(name, tp.names, Nil, Nil, tp.bounds, Nil,
+                       tdefaults = tp.defaults, opaque = opaque, tvalues = tp.values,
+                       deriving = derives)
+          }
 
         // A struct with **no body at all**, which only an `opaque` one may be: it is C's incomplete
         // type, `struct sqlite3;`, and it is what a handle from a C library should be declared as.
