@@ -7,6 +7,15 @@ copy -- correct a mistake there and regenerate, rather than editing this file. V
 `MAJOR.MINOR.PATCH`; while the leading zero stands the language is still moving, and a release may
 change what an existing program means. Where it does, the release says so.
 
+## Unreleased
+
+`sysl emit-typed <file>` prints one module's typed tree as deterministic text -- `emit-ast`'s
+analysed counterpart. It runs parsing and analysis against the standard module exactly as
+`emit-llvm` does, with no lowering and no codegen, and prints every node with its resolved type
+rendered as the compiler's own diagnostic text. `--no-spans` omits every node's source span, and
+`--tables` prints the module's declaration tables -- every struct, enum, trait implementation,
+extern, module `val` and function, sorted by name -- instead of the tree.
+
 ## 0.0.110 — 2026-09-08
 
 This is the release that restarts the 0.1.0 burn-in clock, since the branch-inference change alters what compiles.

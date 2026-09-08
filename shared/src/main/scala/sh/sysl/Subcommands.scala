@@ -236,6 +236,25 @@ private def prove(cfg: Config, sources: List[Source], libraries: List[Program], 
       code
 }
 
+/** `sysl emit-typed` — one module's typed tree, as deterministic text (`TypedAstPrinter`), or its
+ * declaration tables under `--tables`.
+ *
+ * It stops at the same typed tree `prove` reads, and for the same reason: analysis has already
+ * checked every rule that could fail, and nothing past this point — pruning, lowering, codegen — is
+ * needed to answer whether two analyzers agree on what a module means. An analysis error is
+ * reported exactly as any other compiling command reports one, with nothing on standard output.
+ */
+private def emitTyped(cfg: Config, sources: List[Source], libraries: List[Program], target: Target,
+                      std: Stdlib, provides: Set[String], paths: SearchPaths): Int = {
+  val (typed, _) =
+    Compiler.typedWith(sources, libraries, target, Some(std), provides, paths) match
+    case Left(err)  => return report(err)
+    case Right(out) => out
+
+  stdout(if cfg.tables then TypedAstPrinter.tables(typed) else TypedAstPrinter.print(typed, spans = !cfg.noSpans))
+  0
+}
+
 /** A WhyML module's name, taken from the file the program was given. It is only a label — Why3 needs
  * one and sysl's module names hold dots a WhyML identifier may not.
  */

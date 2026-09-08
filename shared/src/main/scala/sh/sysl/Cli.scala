@@ -162,6 +162,10 @@ case class Config(
       * does (`AstPrinter`).
       */
     noSpans: Boolean = false,
+    /** `emit-typed --tables` — print the module's declaration tables instead of its typed tree
+      * (`TypedAstPrinter`).
+      */
+    tables: Boolean = false,
     /** `prove --overflow` — whether staying in an integer's range is a proof obligation. */
     overflow: String = "check",
 ) {
@@ -274,6 +278,19 @@ private[sysl] val parser = {
           opt[Unit]("no-spans")
             .action((_, c) => c.copy(noSpans = true))
             .text("omit every node's source span, for a diff that does not move when a line does"),
+        ),
+      cmd("emit-typed")
+        .action((_, c) => c.copy(command = "emit-typed"))
+        .text("print one module's typed tree, as deterministic text — parsing and analysis, " +
+          "against the standard module, with no lowering and no codegen")
+        .children(
+          arg[String]("<path>").required().action((f, c) => c.copy(file = f)),
+          opt[Unit]("no-spans")
+            .action((_, c) => c.copy(noSpans = true))
+            .text("omit every node's source span, for a diff that does not move when a line does"),
+          opt[Unit]("tables")
+            .action((_, c) => c.copy(tables = true))
+            .text("print the module's declaration tables instead of its typed tree"),
         ),
       cmd("prove")
         .action((_, c) => c.copy(command = "prove"))

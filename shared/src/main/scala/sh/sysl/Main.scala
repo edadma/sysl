@@ -348,9 +348,10 @@ private[sysl] def execute(asked: Config): Int = {
   // driver: the reader asked for a build of a machine that cannot be built, which is one mistake
   // with one answer, and five separate failures deep in the toolchain would each describe the last
   // step rather than the first. The answer names what *does* work, since there is one.
-  // `emit-llvm` is the whole of what this machine supports and `prove` never lowers at all, so both
-  // go through — the list is what needs a *driver* rather than what needs a target.
-  if !target.buildsWithClang && !Set("emit-llvm", "prove")(cfg.command) then
+  // `emit-llvm` is the whole of what this machine supports, and `prove` and `emit-typed` never
+  // lower at all, so all three go through — the list is what needs a *driver* rather than what
+  // needs a target.
+  if !target.buildsWithClang && !Set("emit-llvm", "prove", "emit-typed")(cfg.command) then
     return fail(target.noToolchain)
 
   // Running the result is what makes `run` and `test` different from `build`, and only this machine
@@ -697,6 +698,12 @@ private[sysl] def execute(asked: Config): Int = {
   if cfg.command == "prove" then
     return prove(cfg, librarySources ::: sources, libraryTrees, target, std, provides, paths)
 
+  // `emit-typed` stops at the same typed tree `prove` does, for the same reason: no pruning, no
+  // lowering, no codegen. It differs only in what it does with the tree once it has it — print it,
+  // rather than translate it to WhyML.
+  if cfg.command == "emit-typed" then
+    return emitTyped(cfg, librarySources ::: sources, libraryTrees, target, std, provides, paths)
+
   // One compilation, whatever the subcommand does with it. The notes come back beside the IR
   // rather than being printed from inside the compiler, which has no business writing to a console.
   val compiled =
@@ -805,8 +812,8 @@ private def fingerprintOfFile(path: String): String =
   catch case _: Exception => "unreadable"
 
 /** Whether a subcommand ends at the linker, which is what decides whether a tree's C is worth
- * compiling. `emit-llvm` and `prove` do not, and `build-lib` never reaches here — it archives its
- * own C rather than linking it.
+ * compiling. `emit-llvm`, `prove` and `emit-typed` do not, and `build-lib` never reaches here — it
+ * archives its own C rather than linking it.
  */
 private def links(command: String): Boolean = command == "build" || command == "run" || command == "test"
 
@@ -824,7 +831,8 @@ private def links(command: String): Boolean = command == "build" || command == "
  * compiled — on the one command somebody reaches for to *diagnose* a build.
  */
 private def analyzesC(command: String): Boolean =
-  links(command) || cLibrary(command) || command == "emit-llvm" || command == "prove"
+  links(command) || cLibrary(command) || command == "emit-llvm" || command == "prove" ||
+    command == "emit-typed"
 
 /** The allocator each `--lib` **source root** declares, named by the root as the reader wrote it.
  *
