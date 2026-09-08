@@ -230,13 +230,29 @@ trait DeclTables extends Reporting {
    */
   protected val hooks = mutable.ListBuffer.empty[THook]
 
+  /** Every file whose header said `@tests` (`reference/attributes.md § @tests — a file of
+   * scaffolding`), so that hoisting can mark what each one declares under the key it hands out.
+   *
+   * Compared by identity, as every other question about a file is: two files of one module are two
+   * `Source`s whatever their text.
+   */
+  protected val testOnlyFiles = mutable.Set.empty[Source]
+
   /** Everything declared in a file whose header said `@tests` (`reference/attributes.md § @tests — a file of scaffolding`), by the module-qualified
    * key every other table here uses.
    *
-   * It is filled from the **parsed** files rather than from hoisting, because the question is about
-   * where a declaration was written and hoisting is where declarations stop remembering that. A set
-   * rather than a list: nothing asks what order test scaffolding was declared in, only whether a
-   * given name is some.
+   * It is filled **while hoisting**, under the key each declaration actually got, from
+   * `testOnlyFiles` and the file being hoisted. Filling it from the parsed files instead — by the
+   * plain module-qualified spelling, before any key was handed out — was wrong for exactly the names
+   * two files contend for: a `private` name a sibling file also declares privately, and a name a
+   * `@tests` file overloads. Either way the second declaration gets a key of its own while the plain
+   * spelling stays the *first's*, so recording the plain one marked whichever file was hoisted
+   * first. Where that was the ordinary file, its own helper was reported as test scaffolding at its
+   * own call site; where it was the test file, the ordinary file's declaration was the one that got
+   * a key nobody had marked, and shipped.
+   *
+   * A set rather than a list: nothing asks what order test scaffolding was declared in, only whether
+   * a given name is some.
    */
   protected val testOnlyDecls = mutable.Set.empty[String]
 

@@ -131,12 +131,14 @@ trait ProgramWalk extends OpaqueResults with DropReturnCheck {
 
     val body = written.flatMap((scope, stmt) => (scope, stmt) :: Deriving.expand(stmt).map((scope, _)))
 
-    // What a `@tests` file declares, before anything is hoisted, because hoisting is where a
-    // declaration stops remembering which file wrote it (`reference/attributes.md § @tests — a file of scaffolding`). The library's files go
-    // through it too: they are files of modules like any other, and the standard module having no
-    // test files today is a fact about today.
-    for (u, s) <- library ::: files if u.testOnly do
-      testOnlyDecls ++= contributed(u).flatMap(Tests.declaredNames).map(Modules.qualify(s.module, _))
+    // Which files said `@tests` (`reference/attributes.md § @tests — a file of scaffolding`).
+    // Hoisting reads this as it goes and marks what each such file declares under the key it hands
+    // out — the *file* rather than the names, because a name is only the declaration's own while no
+    // sibling file contends for the spelling, and a key always is. The library's files go through it
+    // too: they are files of modules like any other, and the standard module having no test files
+    // today is a fact about today.
+    for (u, _) <- library ::: files if u.testOnly do
+      testOnlyFiles += u.source
 
       // An `impl` block is the one declaration a test file may not write, and the reason is that it
       // does not declare a *name* — it puts an entry in a method table, which is a claim about a

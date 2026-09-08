@@ -62,6 +62,7 @@ trait Hoisting extends HoistMembers {
       structDecls(key) = s.copy(name = key).setPos(s.pos)
       for m <- s.members do checkSolvedDefaults("the method", s"${s.name}.${m.name}", m.tdefaults)
       declScope(key) = currentScope
+      markTestOnly(key)
       recordAccess(key, s.vis)
       // A field's and a member's reach is settled here beside the type's rather than where the
       // members are lowered, because both are compared against the type's own — and against the
@@ -81,6 +82,7 @@ trait Hoisting extends HoistMembers {
       enumDecls(key) = e.copy(name = key).setPos(e.pos)
       for m <- e.members do checkSolvedDefaults("the method", s"${e.name}.${m.name}", m.tdefaults)
       declScope(key) = currentScope
+      markTestOnly(key)
       recordAccess(key, e.vis)
       for m <- e.members do at(m.pos)(recordMemberAccess(key, m.name, m.vis, s"${e.name}.${m.name}"))
       if libraryOffers(e, currentModule) then libraryNames(e.name) = key
@@ -127,6 +129,7 @@ trait Hoisting extends HoistMembers {
       traitDecls(key) = t.copy(name = key, methods = loweredMembers(pairSetters(t.methods, t.name)))
         .setPos(t.pos)
       declScope(key) = currentScope
+      markTestOnly(key)
       recordAccess(key, t.vis)
       // A trait's members take no modifier of their own, so each is recorded at the trait's reach —
       // which is what makes "how far does this member go" one question with one answer, whether it
@@ -179,6 +182,7 @@ trait Hoisting extends HoistMembers {
       checkNoModuleOfThatName(key, t.name, "member")
       constrainedDecls(key) = t.copy(name = key).setPos(t.pos)
       declScope(key) = currentScope
+      markTestOnly(key)
       recordAccess(key, t.vis)
     // An assert declares no name, so there is nothing to register and nothing for it to collide
     // with — it is only collected, and settled in the same window a constant's value is. That
@@ -199,6 +203,7 @@ trait Hoisting extends HoistMembers {
       else for what <- valueNameHolder(key) do duplicate(key, s"'${c.name}' is already used by $what")
       constDecls(key) = c.copy(name = key).setPos(c.pos)
       declScope(key) = currentScope
+      markTestOnly(key)
       recordAccess(key, c.vis)
 
     // A `val` is registered beside the constants and for the same reason: it is a value a bare name
@@ -218,6 +223,7 @@ trait Hoisting extends HoistMembers {
         err(s"a module-level 'val' states its type, so '${v.name}' needs one — 'val ${v.name}: T = …'")
       valDecls(key) = v.copy(name = key).setPos(v.pos)
       declScope(key) = currentScope
+      markTestOnly(key)
       recordAccess(key, v.vis)
 
     // A module `var` is registered beside the `val`s because it is the same kind of thing: storage
@@ -244,6 +250,7 @@ trait Hoisting extends HoistMembers {
           s"'${v.name}: T'")
       staticVarDecls(key) = v.copy(name = key).setPos(v.pos)
       declScope(key) = currentScope
+      markTestOnly(key)
       recordAccess(key, v.vis)
 
     // An `extern` variable is registered here rather than with the functions, because what it
@@ -258,6 +265,7 @@ trait Hoisting extends HoistMembers {
       else for what <- valueNameHolder(key) do duplicate(key, s"'${e.name}' is already used by $what")
       externVarDecls(key) = e.copy(name = key, link = Some(e.symbol)).setPos(e.pos)
       declScope(key) = currentScope
+      markTestOnly(key)
       recordAccess(key, e.vis)
       if libraryOffers(e, currentModule) then libraryNames(e.name) = key
       for s <- e.link if !s.matches("[A-Za-z0-9_$.]+") do
@@ -354,6 +362,7 @@ trait Hoisting extends HoistMembers {
         duplicate(key, s"'${f.name}' is already declared as an 'extern' variable")
       funcDecls(key) = f.copy(name = key).setPos(f.pos)
       declScope(key) = currentScope
+      markTestOnly(key)
       recordAccess(key, f.vis)
       // The **plain** key, always: what a library offers under a bare name is the name, and the name
       // is the whole overload set. An overload registered here under its own key would leave the
@@ -441,6 +450,7 @@ trait Hoisting extends HoistMembers {
       funcDecls(key) = FuncDecl(key, Nil, e.params, e.retType, Nil, variadic = e.variadic,
         needs = e.needs).setPos(e.pos)
       declScope(key) = currentScope
+      markTestOnly(key)
       recordAccess(key, e.vis)
       if libraryOffers(e, currentModule) && key == plain then libraryNames(e.name) = key
 
@@ -915,23 +925,26 @@ trait Hoisting extends HoistMembers {
                 then s"$plain.private${filePrivateSlots(plain).length + 1}"
                 else plain
 
-              if key != plain then
-                filePrivateSlots(plain) = filePrivateSlots(plain) :+ key
-
-                // **A numbered key is the same declaration, so it inherits the plain key's
-                // scaffolding.** `testOnlyDecls` is filled before anything is hoisted — that is what
-                // lets it remember which file wrote a declaration — so it can only hold the plain
-                // spelling, and the second file to declare a file-private name is the one that gets
-                // a key nobody put in it. Every consumer then reads that body as shipped code:
-                // `TestScope` reports its calls into the test file it is *in*, `Tests.strip` is
-                // asked about a name it does not know, and `NoAlloc` holds it to the module's clause
-                // rather than to the tests'. Two `tests.sysl` files of one module each writing a
-                // `private scratch` is the whole of what it takes.
-                if testOnlyDecls(plain) then testOnlyDecls += key
+              if key != plain then filePrivateSlots(plain) = filePrivateSlots(plain) :+ key
 
               filePrivateKeys((file, plain)) = key
               key
   }
+
+  /** Records a declaration as scaffolding where the file being hoisted said `@tests`
+   * (`reference/attributes.md § @tests — a file of scaffolding`).
+   *
+   * **Under the key, and asked of the file** — which is the whole of it, and is what a set filled
+   * from the parsed files by plain spelling could not do. A name two files contend for leaves one of
+   * them holding a key of its own (`declKey`, `overloadSlot`), and the plain spelling then names the
+   * *other* file's declaration: recording the plain one marked a declaration by whichever file was
+   * hoisted first rather than by the file that wrote it. Both ways round were wrong. An ordinary
+   * file first had its own `private` helper reported at its own call site as reaching into a test
+   * file; a test file first left the ordinary file's declaration marked by nothing, so `Tests.strip`
+   * kept scaffolding in a shipping build and `NoAlloc` held it to the wrong clause.
+   */
+  protected def markTestOnly(key: String): Unit =
+    if currentFile.exists(testOnlyFiles.contains) then testOnlyDecls += key
 
   /** The numbered keys handed out for one contended file-private spelling, so the next file gets a
    * fresh one. Empty for every name only one file declares privately, which is nearly all of them.

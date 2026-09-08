@@ -337,6 +337,108 @@ class TestFileTests extends AnyFreeSpec with CodegenSupport with RunSupport {
     }
   }
 
+  /** `private` in sysl is private to the **file** (`reference/modules.md § A file-private name is
+   * scoped to its file`), so two files of one module may each declare their own `pick` — and only
+   * one of them can hold the plain module-qualified key, the other taking a numbered one. The same
+   * is true of an overload: the first declaration keeps the plain key and the rest are numbered.
+   *
+   * So which declaration a `@tests` header is about is a question about the **key**, and asking it
+   * about the plain spelling answered for whichever file was hoisted first. Both directions were
+   * wrong, and the pair is why the marking follows the file rather than the name: an ordinary file
+   * first had its own helper reported at its own call site as reaching into the test file, and the
+   * test file first left the ordinary file's declaration marked as scaffolding under a numbered key
+   * — which put an internal spelling into a diagnostic and would have dropped a shipping
+   * declaration.
+   */
+  "a name two files of one module contend for is marked by the file that wrote it" - {
+
+    val ordinary = "module m\n\nprivate pick(n: int) -> int = n\n\nuse(n: int) -> int = pick(n)"
+
+    val tests =
+      "module m\n@tests\n\nprivate pick(s: string) -> string = s\n\n" +
+        "@test\nthe_tests_file_picks_a_string() =\n    assert(pick(\"x\") == \"x\")\n"
+
+    "the ordinary file's call answers its own file-private helper" in {
+      runIn(
+        ("", "main.sysl", "import m.*\nprint(use(3))"),
+        ("m", "a.sysl", ordinary),
+        ("m", "b.sysl", tests),
+      ) shouldBe "3\n"
+    }
+
+    "and the test file's own is still its own, so the test runs" in {
+      val ran = ranIn(
+        ("", "main.sysl", "import m.*\nprint(use(3))"),
+        ("m", "a.sysl", ordinary),
+        ("m", "b.sysl", tests),
+      )
+
+      ran.map(o => o.test.display -> o.passed) shouldBe List("the_tests_file_picks_a_string" -> true)
+    }
+
+    "whichever of the two the walk reaches first" in {
+      runIn(
+        ("", "main.sysl", "import m.*\nprint(use(3))"),
+        ("m", "a_tests.sysl", tests),
+        ("m", "z.sysl", ordinary),
+      ) shouldBe "3\n"
+
+      val ran = ranIn(
+        ("", "main.sysl", "import m.*\nprint(use(3))"),
+        ("m", "a_tests.sysl", tests),
+        ("m", "z.sysl", ordinary),
+      )
+
+      ran.map(o => o.test.display -> o.passed) shouldBe List("the_tests_file_picks_a_string" -> true)
+    }
+
+    /** The control the pair above is read against: nothing here says `@tests` at all, and two files
+     * each keeping a `pick` to themselves is the ordinary arrangement the modifier is for.
+     */
+    "two ordinary files each with one is the control, and compiles" in {
+      runIn(
+        ("", "main.sysl", "import m.*\nprint(use(3))\nprint(use_s(\"x\"))"),
+        ("m", "a.sysl", ordinary),
+        ("m", "b.sysl",
+         "module m\n\nprivate pick(s: string) -> string = s\n\nuse_s(s: string) -> string = pick(s)"),
+      ) shouldBe "3\nx\n"
+    }
+
+    "and an overload split across the two is the same question about the same keys" in {
+      val ran = ranIn(
+        ("", "main.sysl", "import m.*\nprint(use(3))"),
+        ("m", "a.sysl", "module m\n\npick(n: int) -> int = n\n\nuse(n: int) -> int = pick(n)"),
+        ("m", "b.sysl",
+         "module m\n@tests\n\npick(s: string) -> string = s\n\n" +
+           "@test\nan_overload_in_the_tests_file() =\n" +
+           "    assert(pick(\"x\") == \"x\")\n    assert(pick(2) == 2)\n"),
+      )
+
+      ran.map(o => o.test.display -> o.passed) shouldBe List("an_overload_in_the_tests_file" -> true)
+    }
+
+    /** What the marking must not lose: the restriction is still the file's, so a test file naming an
+     * ordinary file's file-private helper is refused — by the privacy rule rather than by the
+     * `@tests` one, because a name this file may not reach is not a candidate for it at all.
+     */
+    "while a test file naming an ordinary file's private helper is still refused" in {
+      errIn(
+        ("", "main.sysl", "import m.*\nprint(use(3))"),
+        ("m", "a.sysl", "module m\n\nprivate helper(n: int) -> int = n\n\nuse(n: int) -> int = helper(n)"),
+        ("m", "b.sysl",
+         "module m\n@tests\n\n@test\nreaches_across() =\n    assert(helper(1) == 1)\n"),
+      ) should include("'m.helper' is private to 'a.sysl', the file that declares it")
+    }
+
+    "and a public declaration in a test file shadows nothing an ordinary file kept private" in {
+      runIn(
+        ("", "main.sysl", "import m.*\nprint(use(3))"),
+        ("m", "a.sysl", ordinary),
+        ("m", "b.sysl", "module m\n@tests\n\npick(s: string) -> string = s"),
+      ) shouldBe "3\n"
+    }
+  }
+
   "an 'impl' block may not sit in one" - {
 
     "because a test build would keep it and every other build would drop it" in {
