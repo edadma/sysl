@@ -16,6 +16,16 @@ rendered as the compiler's own diagnostic text. `--no-spans` omits every node's 
 `--tables` prints the module's declaration tables -- every struct, enum, trait implementation,
 extern, module `val` and function, sorted by name -- instead of the tree.
 
+##### An operator on a large value reaches its trait method the way every other call does
+
+`a == b` faulted where `a.eq(b)` on the same values answered, for any type over 128 bytes with an
+`impl Eq` of its own -- six `string` fields, in a struct or in an enum variant, was the first shape
+to reach it. A value that size crosses a call as an address and the method's own definition says so,
+but the operator route handed over the value itself; the callee then read its first word as the
+address it had been promised. `<` and the rest of `Ord` faulted the same way, and a compound
+assignment whose method returns a value that size did not compile at all. All three now cross the
+call exactly as an ordinary one does.
+
 ## 0.0.110 — 2026-09-08
 
 This is the release that restarts the 0.1.0 burn-in clock, since the branch-inference change alters what compiles.

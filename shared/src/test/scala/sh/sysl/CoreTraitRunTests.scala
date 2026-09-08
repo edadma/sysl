@@ -670,4 +670,199 @@ class CoreTraitRunTests extends AnyFreeSpec with RunSupport with CodegenSupport 
       run(src) shouldBe "1000\n"
     }
   }
+
+  /** An operand-sharing form reaches the trait's method with the value already in a register, which
+   * is a **second route to the same call** — and a route says nothing about the convention the
+   * callee was defined under. Past `Layout.DirectBytes` a parameter is an address, so the value has
+   * to be staged into storage and the address handed over, exactly as an ordinary call does for an
+   * argument it cannot take the address of.
+   *
+   * Nothing diagnoses getting that wrong. A `call` naming the aggregate where the definition names
+   * a pointer assembles, links, and reads the first word of the value as the address it was
+   * promised — so the shape of the failure is a fault inside a method whose body touches nothing.
+   * A string is three words here, which puts six of them one field past the boundary and five of
+   * them exactly on it.
+   */
+  "an operator whose operand is past the by-value boundary hands over an address" - {
+
+    /** The reduction: an enum whose widest variant carries six counted fields, compared at a
+     * variant that carries none. `eq` is written to answer without reading either operand, so
+     * anything but `true` is the handover rather than the comparison.
+     */
+    val wide =
+      """enum Wide
+        |    Empty
+        |    Many(a: string, b: string, c: string, d: string, e: string, f: string)
+        |impl Eq for Wide
+        |    eq(self, rhs: Wide) -> bool = true
+        |""".stripMargin
+
+    "the same method answers whether it is reached by name or by operator" in {
+      run(wide + "var w: Wide = Empty\nprint(w.eq(w))\nprint(w == w)") shouldBe "true\ntrue\n"
+    }
+
+    "and it reads the operands it was handed, not the words underneath them" in {
+      val src =
+        """enum Wide
+          |    Empty
+          |    Many(a: string, b: string, c: string, d: string, e: string, f: string)
+          |impl Eq for Wide
+          |    eq(self, rhs: Wide) -> bool
+          |        tail(self) == tail(rhs)
+          |tail(w: Wide) -> string
+          |    w match
+          |        Empty -> ""
+          |        Many(a, b, c, d, e, f) -> f
+          |var x: Wide = Many("a", "b", "c", "d", "e", "f")
+          |var y: Wide = Many("a", "b", "c", "d", "e", "z")
+          |print(x == x, x == y, x != y)""".stripMargin
+
+      run(src) shouldBe "true false true\n"
+    }
+
+    "one field further past it is no different" in {
+      val src =
+        """struct Seven
+          |    a: string
+          |    b: string
+          |    c: string
+          |    d: string
+          |    e: string
+          |    f: string
+          |    g: string
+          |impl Eq for Seven
+          |    eq(self, rhs: Self) -> bool = self.g == rhs.g
+          |var s = Seven("1", "2", "3", "4", "5", "6", "7")
+          |var t = Seven("1", "2", "3", "4", "5", "6", "x")
+          |print(s == s, s == t, s != t)""".stripMargin
+
+      run(src) shouldBe "true false true\n"
+    }
+
+    // A payload of mixed widths rather than six of one, so the boundary is crossed by a shape no
+    // single field count would have predicted.
+    "a mixed payload past the boundary behaves the same" in {
+      val src =
+        """struct Mixed
+          |    name: string
+          |    cells: [12]i64
+          |    tag: int
+          |    flag: bool
+          |    ratio: f64
+          |    note: string
+          |impl Eq for Mixed
+          |    eq(self, rhs: Self) -> bool = self.tag == rhs.tag && self.note == rhs.note
+          |var m = Mixed("m", [0; 12], 7, true, 1.5, "n")
+          |var n = Mixed("m", [0; 12], 8, true, 1.5, "n")
+          |print(m == m, m == n, m != n)""".stripMargin
+
+      run(src) shouldBe "true false true\n"
+    }
+
+    // The operand reaches the operator through a type parameter, so nothing at the call site names
+    // the width the boundary is about — the instantiation is where it has to be got right.
+    "a generic function over an 'Eq' bound compares one the same way" in {
+      val src =
+        """struct Wide6
+          |    a: string
+          |    b: string
+          |    c: string
+          |    d: string
+          |    e: string
+          |    f: string
+          |impl Eq for Wide6
+          |    eq(self, rhs: Self) -> bool = self.f == rhs.f
+          |same[T: Eq](x: T, y: T) -> bool = x == y
+          |differ[T: Eq](x: T, y: T) -> bool = x != y
+          |var p = Wide6("1", "2", "3", "4", "5", "6")
+          |var q = Wide6("1", "2", "3", "4", "5", "z")
+          |print(same(p, p), same(p, q), differ(p, q))""".stripMargin
+
+      run(src) shouldBe "true false true\n"
+    }
+
+    // `Ord` reaches `dispatchValue` by the same route `Eq` does, and a chain reaches it twice over
+    // one shared evaluation — which is the form the whole path exists for.
+    "'<' and a chain of them cross it too" in {
+      val src =
+        """struct Wide6
+          |    a: string
+          |    b: string
+          |    c: string
+          |    d: string
+          |    e: string
+          |    f: string
+          |impl Ord for Wide6
+          |    lt(self, rhs: Self) -> bool = self.f < rhs.f
+          |var p = Wide6("1", "2", "3", "4", "5", "1")
+          |var q = Wide6("1", "2", "3", "4", "5", "5")
+          |var r = Wide6("1", "2", "3", "4", "5", "9")
+          |print(p < q, r < q, p >= q, p < q < r, r < q < p)""".stripMargin
+
+      run(src) shouldBe "true false false true false\n"
+    }
+
+    // The other half of the same boundary: a compound assignment's method **returns** a large value,
+    // which comes back through an out-pointer rather than as a result.
+    "a compound assignment whose method returns a large value still assigns it" in {
+      val src =
+        """struct Wide6
+          |    a: string
+          |    b: string
+          |    c: string
+          |    d: string
+          |    e: string
+          |    f: string
+          |impl Add for Wide6
+          |    add(self, rhs: Self) -> Self = Wide6(self.a + rhs.a, "b", "c", "d", "e", self.f + rhs.f)
+          |var p = Wide6("1", "2", "3", "4", "5", "6")
+          |var q = Wide6("x", "2", "3", "4", "5", "y")
+          |p += q
+          |print(p.a, p.f)""".stripMargin
+
+      run(src) shouldBe "1x 6y\n"
+    }
+
+    // The boundary has two sides, and one that could be anywhere is not a boundary. Five strings
+    // are exactly `Layout.DirectBytes`, so this pair still crosses the call as a value.
+    "while an operand that stops short of it is still passed as a value" in {
+      val src =
+        """struct Narrow5
+          |    a: string
+          |    b: string
+          |    c: string
+          |    d: string
+          |    e: string
+          |impl Eq for Narrow5
+          |    eq(self, rhs: Self) -> bool = self.e == rhs.e
+          |var p = Narrow5("1", "2", "3", "4", "5")
+          |var q = Narrow5("1", "2", "3", "4", "z")
+          |print(p == p, p == q, p != q)""".stripMargin
+
+      run(src) shouldBe "true false true\n"
+    }
+
+    // A large operand that carries counted storage, driven hard enough that a count taken once too
+    // often or once too seldom shows up as a leak or a double free rather than a wrong answer.
+    "and one carrying references is counted exactly once either way" in {
+      val src =
+        """struct Wide6
+          |    a: string
+          |    b: string
+          |    c: string
+          |    d: string
+          |    e: string
+          |    f: string
+          |impl Eq for Wide6
+          |    eq(self, rhs: Self) -> bool = self.f == rhs.f
+          |var n = 0
+          |while n < 1000
+          |    var p = Wide6(str(n), "b", "c", "d", "e", str(n))
+          |    var q = Wide6(str(n), "b", "c", "d", "e", "z")
+          |    if p == q then n += 2 else n += 1
+          |print(n)""".stripMargin
+
+      run(src) shouldBe "1000\n"
+    }
+  }
 }

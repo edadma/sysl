@@ -1,6 +1,6 @@
 package sh.sysl
 
-import ir.{Arg, BinOp, CastOp, Inst, LType, Val}
+import ir.{Access, Arg, BinOp, CastOp, Inst, LType, Val}
 
 /** Arithmetic, comparison, and the conversions between scalar widths.
  *
@@ -28,7 +28,9 @@ trait ArithEmitter extends CallEmitter {
   protected def combine(op: String, ty: Type, valueTy: Type, dispatch: Option[TDispatch],
                         cur: Val, v: Val): Val =
     (ty, dispatch) match
-      case (_, Some(d))  => ownTemp(dispatchValue(d, ty, valueTy, cur, v, ty), ty)
+      // The dispatched call owns its own result, the way every other call to sysl does — `ownTemp`
+      // here as well would put one value in the region twice and release it twice.
+      case (_, Some(d))  => dispatchValue(d, ty, valueTy, cur, v, ty)
       case (Type.Str, _) => ownTemp(strConcat(cur, v), Type.Str)
       // A constrained slot is arithmetic at the type it is laid out as, which is what the binary
       // path does too — the subtype names a set of values, not a second way to add. It detects
@@ -120,18 +122,41 @@ trait ArithEmitter extends CallEmitter {
    * the same one (`library/core.md § Walking a type of your own`): `c *= 2.0` passes a complex
    * number and a `real`. A swap exchanges the values and their types together, since it is the
    * values that are being reordered.
+   *
+   * **Having the operands as values changes nothing about the convention they cross the call
+   * under.** A value past `layout.indirect`'s boundary is handed over as an address whatever route
+   * the call was written by, because that is what the callee's parameters say — so a large operand
+   * is staged into a slot here exactly as `CallEmitter.argValue` stages one it cannot take the
+   * address of, and a large result comes back through the `sret` pointer `genSyslCall` supplies.
+   * Passing the value itself instead produces a `call` whose argument types disagree with the
+   * definition's, which LLVM does not diagnose: the callee reads the first word of the aggregate as
+   * the address it was promised and faults on it.
    */
   private def dispatchValue(d: TDispatch, aty: Type, bty: Type, av: Val, bv: Val, resultTy: Type): Val = {
     val (l, lty, r, rty) = if d.swap then (bv, bty, av, aty) else (av, aty, bv, bty)
-    val res              = freshReg()
     val (what, callee)   = calleeParts(d.name, resultTy)
-
-    emit(what.call(Some(res), callee, List(Arg(lty.lty, l), Arg(rty.lty, r))))
+    val res              = genSyslCall(what, callee, List(operandArg(lty, l), operandArg(rty, r)), resultTy, None)
 
     if !d.negate then res
     else
       val n = freshReg(); emit(Inst.Bin(n, BinOp.Xor, LType.I(1), res, Val.Bool(true))); n
   }
+
+  /** One operand of a dispatched operator, in the form the callee receives it: itself where it is a
+   * first-class value, and the address of a slot holding it where it is not.
+   *
+   * The slot is staging and nothing more — the callee copies out of it at entry and takes its own
+   * count there, exactly as it does for an argument whose address the caller already had, so
+   * nothing here owns anything and nothing releases it.
+   */
+  private def operandArg(ty: Type, v: Val): Arg =
+    if !layout.indirect(ty) then Arg(ty.lty, v)
+    else
+      val slot = emitAlloca(freshReg(), ty.lty)
+
+      emit(Inst.Store(ty.lty, v, slot, Access.Plain))
+      Arg(LType.Ptr, slot)
+
   /** The zero value of a type — what a slot holds before anything is stored into it, and what a
    * function with no trailing expression returns.
    */

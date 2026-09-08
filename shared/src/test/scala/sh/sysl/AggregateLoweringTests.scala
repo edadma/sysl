@@ -152,6 +152,54 @@ class AggregateLoweringTests extends AnyFreeSpec with CodegenSupport with RunSup
     }
   }
 
+  /** A comparison and a compound assignment reach an operator's trait method with the operands
+   * already evaluated (`ArithEmitter.dispatchValue`), which is a **second route** to a call the
+   * definition knows nothing about — so it owes the boundary everything the ordinary route owes it.
+   *
+   * Nothing else would catch getting that wrong. A `call` naming the aggregate where the definition
+   * names a pointer assembles and links: the callee reads the first word of the value as the
+   * address it was promised, and what the program does then is whatever that word happened to be.
+   */
+  "an operator dispatched to a trait method crosses the boundary the same way" - {
+    val comparable =
+      big +
+        """impl Eq for Big
+          |    eq(self, rhs: Self) -> bool = self.tag == rhs.tag
+          |""".stripMargin
+
+    "so '==' hands its operands over at an address" in {
+      val out = ir(comparable + "var b = Big([0; 64], 1)\nprint(b == b)")
+
+      out should include("define zeroext i1 @Big.eq(ptr %self.param, ptr %rhs.param)")
+      mainOf(out) should include("call zeroext i1 @Big.eq(ptr")
+      mainOf(out) should not include "@Big.eq(%struct.Big"
+    }
+
+    "and a compound assignment takes its result back through the out-pointer" in {
+      val out = ir(big +
+        """impl Add for Big
+          |    add(self, rhs: Self) -> Self = Big([0; 64], self.tag + rhs.tag)
+          |var b = Big([0; 64], 1)
+          |b += b
+          |print(b.tag)""".stripMargin)
+
+      out should include("define void @Big.add(ptr noalias sret(%struct.Big) align 8 %sret.out, ptr %self.param, ptr %rhs.param)")
+      mainOf(out) should include("call void @Big.add(ptr sret(%struct.Big) align 8 ")
+      mainOf(out) should not include "@Big.add(%struct.Big"
+    }
+
+    "while a small operand is still handed over as a value" in {
+      val out = ir(small +
+        """impl Eq for Small
+          |    eq(self, rhs: Self) -> bool = self.x == rhs.x
+          |var s = Small(1, 2)
+          |print(s == s)""".stripMargin)
+
+      out should include("define zeroext i1 @Small.eq(%struct.Small %self.param, %struct.Small %rhs.param)")
+      mainOf(out) should include("call zeroext i1 @Small.eq(%struct.Small")
+    }
+  }
+
   // The threshold is a number, so the test that matters is the one either side of it. Sixteen
   // 8-byte cells are exactly `Layout.DirectBytes`; seventeen are one word past it.
   "the threshold falls where Layout says it does" - {
