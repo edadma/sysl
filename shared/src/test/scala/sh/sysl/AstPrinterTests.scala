@@ -200,6 +200,15 @@ class AstPrinterTests extends AnyFreeSpec with Matchers {
 
       linesOf("IfExpr", src) shouldBe List(2, 4, 6)
     }
+
+    // `(..A)`, a type pack's tuple form, is read by `packTuple` as a `TupleType(List(PackType(n)))`
+    // — the enclosing `at` around `coreType` reaches only the `TupleType`, so the `PackType` inside
+    // it used to print bare.
+    "a type pack's tuple form is positioned throughout" in {
+      val src = "count[..A](t: (..A)) -> usize = 0\n"
+
+      positionless(src) shouldBe empty
+    }
   }
 
   "every node kind the tree can hold is reachable" - {

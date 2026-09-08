@@ -119,15 +119,17 @@ object AstPrinter {
      *
      * **The tree's five `enum`s are matched by hand, and this is not the generic case rescued by a
      * fallback — it is the only reliable route.** A parameterless case — `Visibility.Public`,
-     * `AsmDir.In`, every `HookKind` — compiles to an anonymous class, so `getClass.getSimpleName`
-     * answers `""` for it on every backend; a case *with* fields (`Visibility.Scoped`,
-     * `RecvMode.ByRef`) does carry a name, but not always the same string, and Scala 3's own
-     * `toString` for a case with none is not a reflection substitute either — it agrees with the
-     * case's name on the JVM and on Scala.js and answers the case's **ordinal** (`"1"` for
-     * `Visibility.Public`) on Scala Native. Caught by the golden test above, which is exact enough to
-     * fail on every `vis: Public` field turning into `vis: 1` under `syslNative/test` and nowhere
-     * else — the tell that this was a backend difference and not a logic error, since the same code
-     * ran unchanged on all three.
+     * `AsmDir.In`, every `HookKind` — compiles to an anonymous class, and the three backends disagree
+     * about what `getClass.getSimpleName` answers for it: `""` on the JVM (as the JDK specifies for
+     * an anonymous class), `"anon$1"` on Scala.js, and a bare ordinal — `"1"` for `Visibility.Public`
+     * — on Scala Native, whose `Class.getSimpleName` splits the binary name (`Visibility$$anon$1`)
+     * on `$` and takes the last piece, landing on the anonymous class's own numbering rather than
+     * anything naming the case (`scala-native/scala-native#5030`). `toString`, string interpolation,
+     * `productPrefix` and `ordinal` all agree with the case's name on every backend — it is only
+     * `getSimpleName` on the anonymous class that diverges. Caught by the golden test above, which is
+     * exact enough to fail on every `vis: Public` field turning into `vis: 1` under `syslNative/test`
+     * and nowhere else — the tell that this was a backend difference and not a logic error, since the
+     * same code ran unchanged on all three.
      *
      * Every other node is a real case class or case object, whose `getSimpleName` names it plainly
      * and identically everywhere — `IntLit`, `WildcardPattern` (stripped of the trailing `$` a case

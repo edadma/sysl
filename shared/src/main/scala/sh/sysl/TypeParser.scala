@@ -148,12 +148,17 @@ trait TypeParser extends ExprParser {
    * Tried before the ordinary tuple, and the two cannot both parse: a pack is the whole of what is
    * between the parentheses. Mixing one with written-out parts — `(..A, int)` — is pack *expansion*
    * and is not built, so it is refused by name rather than left to fail as a type called `..A`.
+   *
+   * **The inner `PackType` is stamped by its own `at`.** The enclosing `at` around `coreType` only
+   * reaches the `TupleType` this rule returns — its own top-level result — so without this the
+   * `PackType` inside would carry no position at all, the same gap `elif` and string interpolation
+   * had before both were given one.
    */
   protected lazy val packTuple: Parser[TypeRef] =
-    (op("(") ~> op("..") ~> ident <~ (op(")") | op(",") ~> err(
+    (op("(") ~> at(op("..") ~> ident ^^ PackType.apply) <~ (op(")") | op(",") ~> err(
       "a type pack is the whole of the tuple it stands for — '(..A, T)' appends to a pack, which " +
         "is not built; write '(..A)' and reach the parts with 'for const'",
-    ))) ^^ { n => TupleType(List(PackType(n))) }
+    ))) ^^ { p => TupleType(List(p)) }
 
   /** A function's declared result: one type, or several separated by commas
    * (`reference/declarations.md § Several results`).

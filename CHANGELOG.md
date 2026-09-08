@@ -31,7 +31,8 @@ than at the first one written in the file, and the nodes an interpolated string 
 desugar to carry positions at all. The literal rules built their node once and handed the same object
 back for every occurrence, and the first position it was given stuck; the desugared concatenation and
 the nested `if` an `elif` becomes were built after the tokens they stand for had been read, so
-nothing positioned them.
+nothing positioned them. A type pack's tuple form, `(..A)`, had the same gap: only the enclosing
+tuple was positioned, and the pack inside it carried no position of its own.
 
 ## 0.0.109 — 2026-09-07
 
