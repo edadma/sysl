@@ -111,33 +111,6 @@ object Tests {
          else "a hook is called for what it does rather than for what it answers") +
         ", so there is nothing to read a value with")
 
-  /** Every name one top-level declaration binds, unqualified — what a `@tests` file has to be read
-   * for, so that what it declared can be recognised again once hoisting has flattened the files
-   * together (`TestScope`).
-   *
-   * It answers for a declaration rather than for a statement: everything below is something a file
-   * may say at its top level, and everything a file may say at its top level that binds a name is
-   * below. An `impl` binds none — which is exactly why such a file may not write one — so its
-   * absence here and its refusal there are the same fact said twice.
-   *
-   * A binding that names several things, written either as a list or as a pattern, is absent for a
-   * different reason: neither can be a module member at all, since its parts have nowhere to write
-   * a type (`reference/declarations.md § Several results`), and `Hoisting` reports one at a file's
-   * top level rather than registering it. So there is no key for this to answer with.
-   */
-  def declaredNames(stmt: Stmt): List[String] = stmt match
-    case d: FuncDecl      => List(d.name)
-    case d: StructDecl    => List(d.name)
-    case d: EnumDecl      => List(d.name)
-    case d: TraitDecl     => List(d.name)
-    case d: TypeDecl      => List(d.name)
-    case d: ConstDecl     => List(d.name)
-    case d: ValDecl       => List(d.name)
-    case d: VarDecl       => List(d.name)
-    case d: ExternDecl    => List(d.name)
-    case d: ExternVarDecl => List(d.name)
-    case _                => Nil
-
   /** What the runner is told about one test: the key that calls it, the name that reports it, and
    * where the attribute was written.
    *
