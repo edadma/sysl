@@ -7,6 +7,13 @@ copy -- correct a mistake there and regenerate, rather than editing this file. V
 `MAJOR.MINOR.PATCH`; while the leading zero stands the language is still moving, and a release may
 change what an existing program means. Where it does, the release says so.
 
+## Unreleased
+
+`sysl emit-ast <file>` prints one file's untyped parse tree as deterministic text -- parse only, no
+analysis and no standard module, so it works on a file that would fail to compile. It is an oracle:
+a second compiler renders its own tree the same way, and `diff` finds where the two parsers disagree.
+`--no-spans` omits every node's source span, for a diff that does not move when a line does.
+
 ## 0.0.109 — 2026-09-07
 
 `slate` (95,757 lines, the largest sysl program there is) now builds under a `GC_MAXIMUM_HEAP_SIZE=20g` cap, at a 19.0 GB peak, down from 36.9 GB in 0.0.108 -- and a hello-world finishes inside `1g`, down from `3g`.

@@ -158,6 +158,10 @@ case class Config(
     header: Option[String] = None,
     /** `prove --emit-whyml` — print the translation instead of running the prover (`reference/verification.md § sysl prove`). */
     emitWhyML: Boolean = false,
+    /** `emit-ast --no-spans` — omit every node's source span, so a diff does not move when a line
+      * does (`AstPrinter`).
+      */
+    noSpans: Boolean = false,
     /** `prove --overflow` — whether staying in an integer's range is a proof obligation. */
     overflow: String = "check",
 ) {
@@ -261,6 +265,16 @@ private[sysl] val parser = {
         .action((_, c) => c.copy(command = "emit-llvm"))
         .text("print the generated LLVM IR")
         .children(arg[String]("<path>").required().action((f, c) => c.copy(file = f))),
+      cmd("emit-ast")
+        .action((_, c) => c.copy(command = "emit-ast"))
+        .text("print one file's untyped parse tree, as deterministic text — parse only, with no " +
+          "analysis and no standard module, so it works on a file that would fail to compile")
+        .children(
+          arg[String]("<path>").required().action((f, c) => c.copy(file = f)),
+          opt[Unit]("no-spans")
+            .action((_, c) => c.copy(noSpans = true))
+            .text("omit every node's source span, for a diff that does not move when a line does"),
+        ),
       cmd("prove")
         .action((_, c) => c.copy(command = "prove"))
         .text("translate a module to WhyML and discharge its proof obligations with Why3 (17)")

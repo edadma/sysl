@@ -122,6 +122,29 @@ private[sysl] def execute(asked: Config): Int = {
 
     return if cfg.command == "weave" then weave(cfg, rendered) else tangle(cfg, rendered)
 
+  // `emit-ast` is the other source-level job that stops here, above everything a compilation
+  // needs: it asks for no standard module and no library, only a parse — so it works on a file
+  // that would fail analysis, which is the whole point of an oracle over a tree still being
+  // written. It differs from `weave`/`tangle` in the one thing rendering does not need:
+  // conditional compilation reads the target (`Conditional`), so `--target` picks one exactly as
+  // every compiling command does, rather than reading every per-OS directory as `Project.Every`
+  // would.
+  if cfg.command == "emit-ast" then
+    if isDirectory(cfg.file) then
+      return fail(s"emit-ast takes a single file, and '${cfg.file}' is a directory")
+
+    val target = chooseTarget(cfg.target, None) match
+      case Left(err) => return fail(err)
+      case Right(t)  => t
+
+    val source =
+      try Source(cfg.file, readFile(cfg.file))
+      catch case e: Exception => return fail(s"cannot read ${cfg.file}: ${e.getMessage}")
+
+    return SyslParser.parse(source, target) match
+      case Left(diagnostic) => report(diagnostic)
+      case Right(program)   => stdout(AstPrinter.print(program, spans = !cfg.noSpans)); 0
+
   val project = readPackageConfig(cfg.file) match
     case Left(err) => return fail(err)
     case Right(p)  => p
