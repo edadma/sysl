@@ -7,6 +7,24 @@ copy -- correct a mistake there and regenerate, rather than editing this file. V
 `MAJOR.MINOR.PATCH`; while the leading zero stands the language is still moving, and a release may
 change what an existing program means. Where it does, the release says so.
 
+## 0.0.112 — 2026-09-09
+
+This is the release that restarts the 0.1.0 burn-in clock, since it changes what compiles.
+
+##### A name two files of one module both declared was marked test-only by whichever file hoisted first
+
+`private` in sysl scopes a declaration to the file that wrote it, so two files of one module may each
+declare a `pick` -- a file-private helper in each, or one overload in an ordinary file and the other
+in a `@tests` file. The test-only mark was keyed by the plain name before hoisting had assigned each
+declaration its own overload slot, so a name two files contended for was marked test-only by
+whichever file happened to be hoisted first. An ordinary file's call to its own private `pick` was
+then refused as reaching into the `@tests` file beside it, and the diagnostic could name an internal
+spelling like `m.pick.private1` instead of the declaration a reader had actually written.
+
+The mark is now applied under the key the declaration actually receives (`Hoisting.markTestOnly`),
+and eight tests in `TestFileTests` pin both hoist orders, the split overload, and the privacy
+refusal that was never meant to change. Found writing the self-hosted compiler.
+
 ## 0.0.111 — 2026-09-08
 
 This is the release that restarts the 0.1.0 burn-in clock again, since the crash fix changes emitted code.
