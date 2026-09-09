@@ -571,6 +571,59 @@ class TestRunnerTests extends AnyFreeSpec with CodegenSupport with TestFramework
     }
   }
 
+  // A hook row uses `Modules.bare(h.func)` as its display, exactly what `hookOutcome` builds —
+  // reused here so a widened "outcomes with a hook row" case is exercised without a real hook
+  // failing under a real process.
+  private def hookRow: TestRunner.Outcome =
+    TestRunner.Outcome(TTest("m.halt", "halt", false, None, "m.sysl", 30),
+      Some("the module's '@teardown_all', 'm.halt', did not return — exit status 1"), "torn down badly\n", 3)
+
+  "streaming a run" - {
+    // `stream` is what `execute` calls as a run goes; `rendered` is the whole report as one string
+    // once a run is over. This is the guarantee the streaming path exists to keep: watching a run
+    // live shows exactly what reading the finished report would have shown, just spread across more
+    // calls, with a hook's own row exercised alongside an ordinary pass and an ordinary failure.
+    "streams byte-for-byte the same text 'rendered' produces for the same outcomes" in {
+      val outcomes = ran :+ hookRow
+      val pieces   = List.newBuilder[String]
+
+      TestRunner.stream(outcomes, 0, outcomes.length, pieces += _)
+
+      pieces.result().mkString shouldBe TestRunner.rendered(outcomes, 0, outcomes.length)
+    }
+
+    "emits the header before any row, and the summary after the last" in {
+      val outcomes = ran :+ hookRow
+      val pieces   = List.newBuilder[String]
+
+      TestRunner.stream(outcomes, 0, outcomes.length, pieces += _)
+
+      val emitted = pieces.result()
+
+      emitted.head should startWith("running")
+      emitted.last should include("passed")
+      emitted.last should include("failed")
+
+      // Everything between the header and the summary is a file heading or a row — neither of
+      // which starts with "running" or holds the closing tally, so the header and the summary are
+      // found exactly once each, at the ends.
+      emitted.count(_.startsWith("running")) shouldBe 1
+      emitted.count(l => l.contains(" passed, ") && l.contains(" failed")) shouldBe 1
+    }
+
+    "an empty run still gets a header and a summary, in that order" in {
+      val pieces = List.newBuilder[String]
+
+      TestRunner.stream(Nil, 0, 0, pieces += _)
+
+      val emitted = pieces.result()
+
+      emitted should have length 2
+      emitted.head should startWith("running 0 tests")
+      emitted.last should include("0 passed, 0 failed")
+    }
+  }
+
   "a test is a member of its module like any other" - {
     // The claim this settles is about *order*: tests are dropped after the whole-program checks
     // have run, so a module's capability clause reaches them (`reference/modules.md § Capabilities

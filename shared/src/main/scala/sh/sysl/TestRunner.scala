@@ -120,10 +120,9 @@ object TestRunner {
           try writeFile(path, RunCache.encode(tests))
           catch case _: Exception => ()
 
-        val outcomes = execute(exe, selected, opts)
+        val outcomes = execute(exe, selected, opts, tests.length - selected.length, emitLine)
 
         if keeping.isEmpty then Project.discard(exe)
-        stdout(rendered(outcomes, tests.length - selected.length, selected.length))
         if outcomes.forall(_.passed) then 0 else 1
   }
 
@@ -146,9 +145,8 @@ object TestRunner {
       Console.err.println(s"no test matches '${opts.filter.getOrElse("")}' — ${tests.length} to choose from")
       return 0
 
-    val outcomes = execute(exe, selected, opts)
+    val outcomes = execute(exe, selected, opts, tests.length - selected.length, emitLine)
 
-    stdout(rendered(outcomes, tests.length - selected.length, selected.length))
     if outcomes.forall(_.passed) then 0 else 1
   }
 
@@ -158,10 +156,33 @@ object TestRunner {
    * `failFast` stops the loop rather than the report: what has run is still reported, and the tests
    * that never ran are simply absent. Reporting them as skipped would be a third verdict for
    * something that is not a verdict at all.
+   *
+   * **`emit` is called as the run goes, not once at the end** — the header first, then a file's
+   * heading before its first row, then each row the moment its test or hook finishes, then the
+   * summary once every test has. A suite that takes half an hour is watched from a log file while
+   * it runs rather than staying silent until it exits, and a run that is killed partway still has
+   * a report of everything up to the kill. The default does nothing, for the callers that only want
+   * the finished list — mostly other tests, which build the report from what is returned instead.
    */
-  def execute(exe: String, tests: List[TTest], opts: Options): List[Outcome] = {
-    val done = List.newBuilder[Outcome]
-    var stop = false
+  def execute(exe: String, tests: List[TTest], opts: Options, filtered: Int = 0,
+              emit: String => Unit = _ => ()): List[Outcome] = {
+    val done  = List.newBuilder[Outcome]
+    var stop  = false
+    var shown = Option.empty[String]
+
+    // Fixed before the first test runs, from every name a row could carry — a test's own, or the
+    // bare name of a hook that might stand in for one — because the alternative is not printing a
+    // row until the last test is known to be the widest, which is the whole run.
+    val width = widthOf(tests)
+
+    def streamOne(o: Outcome): Unit = {
+      if !shown.contains(o.test.file) then
+        emit(fileHeader(o.test.file))
+        shown = Some(o.test.file)
+      emit(row(o, width))
+    }
+
+    emit(header(tests.length, filtered))
 
     for (_, group) <- byModule(tests) if !stop do
       val hooks = group.head.hooks
@@ -174,13 +195,16 @@ object TestRunner {
 
       booted match
         case Some((h, r)) if r.failed =>
-          done += hookOutcome(h, r)
+          val outcome = hookOutcome(h, r)
+          done += outcome
+          streamOne(outcome)
           if opts.failFast then stop = true
         case _ =>
           for t <- group if !stop do
             val outcome = one(exe, t)
 
             done += outcome
+            streamOne(outcome)
             if opts.failFast && !outcome.passed then stop = true
 
       // `@teardown_all` runs whatever became of the tests, and whatever became of `@setup_all`:
@@ -190,10 +214,32 @@ object TestRunner {
         val r = runHook(exe, h)
 
         if r.failed then
-          done += hookOutcome(h, r)
+          val outcome = hookOutcome(h, r)
+          done += outcome
+          streamOne(outcome)
           if opts.failFast then stop = true
 
-    done.result()
+    val outcomes = done.result()
+    emit(summary(outcomes))
+    outcomes
+  }
+
+  /** The widest name a row in this run could carry, fixed before anything is run so the first row
+   * can be streamed immediately. Covers both what `tests` will show and the bare name of every hook
+   * their modules declare, since a failing `@setup_all` or `@teardown_all` reports under that name
+   * instead (`hookOutcome`) — so the padding a live row gets does not shift once a hook fails.
+   */
+  private def widthOf(tests: List[TTest]): Int = {
+    val names = tests.map(_.display) ++ tests.flatMap(_.hooks.all).map(h => Modules.bare(h.func))
+    if names.isEmpty then 0 else names.map(_.length).max
+  }
+
+  /** Prints one piece of a report immediately and flushes, so a run followed through a log file
+   * shows each verdict as it lands rather than only once the process exits.
+   */
+  private def emitLine(s: String): Unit = {
+    stdout(s)
+    Console.flush()
   }
 
   /** The selected tests grouped by the module that declared them, in the order the modules were
@@ -311,32 +357,69 @@ object TestRunner {
    * was doing, not something anyone asked to read.
    */
   def rendered(outcomes: List[Outcome], filtered: Int, selected: Int): String = {
-    val out    = new StringBuilder
-    val failed = outcomes.count(!_.passed)
-    val total  = outcomes.map(_.millis).sum
-    val width  = if outcomes.isEmpty then 0 else outcomes.map(_.test.display.length).max
+    val out = new StringBuilder
+    stream(outcomes, filtered, selected, out ++= _)
+    out.toString
+  }
 
-    // The header counts the **tests** that were selected, which is not the number of rows below it:
-    // a hook that did not come back gets a row of its own, and a module whose `@setup_all` failed
-    // has tests that were selected and never ran. Reading the count off the rows would say "running
-    // 4 tests" over three tests and a hook.
+  /** `rendered`, taken apart into the pieces a live run emits one at a time — the header, then
+   * each file's heading before its first row, then each row, then the summary. Given the same
+   * outcomes in the same order, the concatenation of every `emit` call is exactly what `rendered`
+   * returns as one string, because both are built from these same four pieces.
+   */
+  def stream(outcomes: List[Outcome], filtered: Int, selected: Int, emit: String => Unit): Unit = {
+    val width = if outcomes.isEmpty then 0 else outcomes.map(_.test.display.length).max
+
+    emit(header(selected, filtered))
+
+    for (file, group) <- outcomes.groupBy(_.test.file).toList.sortBy(_._1) do
+      emit(fileHeader(file))
+      for o <- group.sortBy(_.test.line) do emit(row(o, width))
+
+    emit(summary(outcomes))
+  }
+
+  /** The header counts the **tests** that were selected, which is not the number of rows below it:
+   * a hook that did not come back gets a row of its own, and a module whose `@setup_all` failed
+   * has tests that were selected and never ran. Reading the count off the rows would say "running
+   * 4 tests" over three tests and a hook.
+   */
+  private def header(selected: Int, filtered: Int): String = {
+    val out = new StringBuilder
+
     out ++= s"running $selected ${if selected == 1 then "test" else "tests"}"
     if filtered > 0 then out ++= s" of ${selected + filtered}"
     out ++= "\n"
-
-    for (file, group) <- outcomes.groupBy(_.test.file).toList.sortBy(_._1) do
-      out ++= s"\n$file\n"
-
-      for o <- group.sortBy(_.test.line) do
-        out ++= s"  ${if o.passed then "ok  " else "FAIL"}  ${o.test.display.padTo(width, ' ')}  ${o.millis}ms\n"
-
-        for detail <- o.detail do
-          out ++= s"        $detail\n"
-          out ++= s"        at ${o.test.file}:${o.test.line}\n"
-          for line <- o.output.linesIterator do out ++= s"        > $line\n"
-
-    out ++= s"\n${outcomes.length - failed} passed, $failed failed — ${total}ms\n"
     out.toString
+  }
+
+  /** The heading a file's rows are shown under — once, before the first of them. */
+  private def fileHeader(file: String): String = s"\n$file\n"
+
+  /** One outcome's row, padded to `width` so every status column lines up regardless of which
+   * row's name happens to be the widest. A failure's own line says what happened; anything the run
+   * printed follows it, indented, and is shown **only** for a failure — output from a test that
+   * passed is what the test was doing, not something anyone asked to read.
+   */
+  private def row(o: Outcome, width: Int): String = {
+    val out = new StringBuilder
+
+    out ++= s"  ${if o.passed then "ok  " else "FAIL"}  ${o.test.display.padTo(width, ' ')}  ${o.millis}ms\n"
+
+    for detail <- o.detail do
+      out ++= s"        $detail\n"
+      out ++= s"        at ${o.test.file}:${o.test.line}\n"
+      for line <- o.output.linesIterator do out ++= s"        > $line\n"
+
+    out.toString
+  }
+
+  /** The closing line: how many of the rows passed, against how long the whole run took. */
+  private def summary(outcomes: List[Outcome]): String = {
+    val failed = outcomes.count(!_.passed)
+    val total  = outcomes.map(_.millis).sum
+
+    s"\n${outcomes.length - failed} passed, $failed failed — ${total}ms\n"
   }
 
   private def fail(msg: String): Int = {
