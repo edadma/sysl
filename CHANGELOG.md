@@ -7,6 +7,14 @@ copy -- correct a mistake there and regenerate, rather than editing this file. V
 `MAJOR.MINOR.PATCH`; while the leading zero stands the language is still moving, and a release may
 change what an existing program means. Where it does, the release says so.
 
+## 0.0.113 — 2026-09-09
+
+This is the release that restarts the 0.1.0 burn-in clock, since it changes what compiles.
+
+##### A file-private declaration shadowed a public one of the same name for every other file of the module
+
+`private` in sysl scopes a declaration to the file that wrote it, and `reference/modules.md` says a name a file may not reach is not a candidate for it. A function name stands for the whole overload set, though, and reach was asked of whichever declaration held the plain key — the first one written. So a public `skip_line(int)` in one file and a `private skip_line(string)` in another answered for each other: with the public one first, a call in its own file passing a string bound the sibling's private function and compiled; with the private one first, every other file in the module was told the *public* declaration was private to a file it had never heard of, and the program was refused. The filter now runs before overload resolution rather than after it, so an unreachable declaration cannot take a call, cannot make one ambiguous, and cannot stand in the roster of what a name offers. Fixed in the same place: a file that declares one spelling twice while a sibling file contends it filed both declarations under one private slot, where the second overwrote the first — a declaration silently gone — and a diagnostic could show the internal `.private1` spelling. Seven tests in `FilePrivateNameTests`. Found writing the self-hosted compiler.
+
 ## 0.0.112 — 2026-09-09
 
 This is the release that restarts the 0.1.0 burn-in clock, since it changes what compiles.
