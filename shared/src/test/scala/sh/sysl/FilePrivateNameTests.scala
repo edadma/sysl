@@ -153,4 +153,141 @@ class FilePrivateNameTests extends AnyFreeSpec with CodegenSupport with RunSuppo
       ) should include("Limit")
     }
   }
+
+  /** A function name stands for every declaration of it, so reach has to be asked of the whole
+   * overload set (`reference/modules.md`: *"A name a file may not reach is not a candidate for
+   * it"*).
+   *
+   * A file-private declaration and a public one of the same spelling in two files are told apart by
+   * their arguments the way any overload pair is — from the file that wrote the private one, which
+   * sees both. From every other file the private declaration is not a candidate at all: it may not
+   * take a call, may not make one ambiguous, and may not stand in the way of the public declaration
+   * being found.
+   */
+  "a private declaration is no candidate outside its own file" - {
+
+    "the public one takes the call its own file makes" in {
+      runIn(
+        ("", "main.sysl", "print(m.use())"),
+        ("m", "one.sysl",
+         """module m
+           |skip_line(n: int) -> int = n + 1
+           |use() -> int = skip_line(1)
+           |""".stripMargin),
+        ("m", "two.sysl",
+         """module m
+           |private skip_line(s: string) -> string = s
+           |""".stripMargin),
+      ) shouldBe "2\n"
+    }
+
+    // The defect this suite's section was written from: the sibling's private declaration took a
+    // call that no declaration the file can name would have taken, and compiled.
+    "and a call the public one does not take is refused rather than reaching the private one" in {
+      errIn(
+        ("", "main.sysl", "print(1)"),
+        ("m", "one.sysl",
+         """module m
+           |skip_line(n: int) -> int = n
+           |use() -> string = skip_line("x")
+           |""".stripMargin),
+        ("m", "two.sysl",
+         """module m
+           |private skip_line(s: string) -> string = s
+           |""".stripMargin),
+      ) should include("is int, but string was given")
+    }
+
+    // The other direction, and the one that refused a program outright: the private declaration was
+    // written first, so it held the plain key, and every other file was told the *public* name was
+    // private to a file it had never heard of.
+    "and a public declaration is found from a third file though a private one holds the name" in {
+      runIn(
+        ("", "main.sysl", "print(m.use_c())"),
+        ("m", "one.sysl",
+         """module m
+           |private skip_line(n: int) -> int = n
+           |use_a() -> int = skip_line(1)
+           |""".stripMargin),
+        ("m", "two.sysl",
+         """module m
+           |skip_line(s: string) -> string = s
+           |""".stripMargin),
+        ("m", "three.sysl",
+         """module m
+           |use_c() -> string = skip_line("y")
+           |""".stripMargin),
+      ) shouldBe "y\n"
+    }
+
+    "and the file that wrote the private one sees both" in {
+      runIn(
+        ("", "main.sysl", "print(m.use_b(), m.use_b_int())"),
+        ("m", "one.sysl",
+         """module m
+           |skip_line(n: int) -> int = n + 1
+           |""".stripMargin),
+        ("m", "two.sysl",
+         """module m
+           |private skip_line(s: string) -> string = s
+           |use_b() -> string = skip_line("x")
+           |use_b_int() -> int = skip_line(1)
+           |""".stripMargin),
+      ) shouldBe "x 2\n"
+    }
+
+    "and a public declaration of the same signature is still a duplicate" in {
+      errIn(
+        ("", "main.sysl", "print(1)"),
+        ("m", "one.sysl",
+         """module m
+           |skip_line(n: int) -> int = n
+           |""".stripMargin),
+        ("m", "two.sysl",
+         """module m
+           |private skip_line(n: int) -> int = n
+           |""".stripMargin),
+      ) should include("already declared")
+    }
+
+    // A private slot holds every declaration one file made of the contended spelling, so it carries
+    // an overload set of its own. Filing them all under the slot itself dropped every one but the
+    // last, and the call the dropped declaration took was then reported against the survivor.
+    "and one file may overload the name it keeps to itself" in {
+      runIn(
+        ("", "main.sysl", "print(m.use_b(), m.use_b2())"),
+        ("m", "one.sysl",
+         """module m
+           |private skip_line(b: bool) -> bool = b
+           |use_a() -> bool = skip_line(true)
+           |""".stripMargin),
+        ("m", "two.sysl",
+         """module m
+           |private skip_line(n: int) -> int = n
+           |private skip_line(s: string) -> string = s
+           |use_b() -> string = skip_line("x")
+           |use_b2() -> int = skip_line(3)
+           |""".stripMargin),
+      ) shouldBe "x 3\n"
+    }
+
+    "and two of them a call could not tell apart are refused, under the name as written" in {
+      val message = errIn(
+        ("", "main.sysl", "print(1)"),
+        ("m", "one.sysl",
+         """module m
+           |private skip_line(b: bool) -> bool = b
+           |""".stripMargin),
+        ("m", "two.sysl",
+         """module m
+           |private skip_line(n: int) -> int = n
+           |private skip_line(n: int) -> string = "x"
+           |""".stripMargin),
+      )
+
+      message should include("'skip_line' is already declared")
+      // The slot is the compiler's answer to a contended spelling, and no reader wrote it.
+      message should not include "private1"
+    }
+  }
 }

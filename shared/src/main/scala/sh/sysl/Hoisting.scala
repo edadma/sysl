@@ -336,16 +336,17 @@ trait Hoisting extends HoistMembers {
         original.copy(tparams = tps, params = ps, bounds = original.bounds ++ bs).setPos(original.pos)
       }
       val plain = Modules.qualify(currentModule, f.name)
-      val key   =
-        // A file-private declaration whose plain key belongs to a *sibling file's* file-private one
-        // is not an overload of it — neither is ever a candidate at the other's call sites, so
-        // there is nothing for a call to be told apart. It takes a private slot, and `overloadKeys`
-        // never sees it, which is what keeps `checkOverloadDistinct` from comparing two
-        // declarations no call site can confuse.
-        declKey(f.name, f.vis, funcDecls.contains) match
-          case k if k != plain           => k
-          case _ if funcDecls.contains(plain) => overloadSlot(plain)
-          case _                              => plain
+      // The key every declaration of this spelling *from this file* shares — the plain one, or the
+      // private slot a file-private declaration takes when the plain key belongs to a sibling
+      // file's file-private declaration. Two such are not overloads of each other: neither is ever a
+      // candidate at the other's call sites, so there is nothing for a call to be told apart, and
+      // `overloadKeys(plain)` never sees the slot.
+      val base = declKey(f.name, f.vis, funcDecls.contains)
+      // **Overloads are counted off whichever key the file's declarations of the name share**, and
+      // that is the whole of why `base` exists. Counting them off the plain key alone left a file
+      // that declares the name twice *and* has a sibling contending it filing both declarations
+      // under one private slot, where the second overwrote the first — a declaration silently gone.
+      val key = if funcDecls.contains(base) then overloadSlot(base) else base
 
       // The other side of the `extern` rule below: overloads of an `extern` are told apart by the
       // symbol each names, and a sysl function has none to give.
@@ -386,6 +387,12 @@ trait Hoisting extends HoistMembers {
           "of it would overload the name, and a program has one beginning rather than a set of them"))
       else if key != plain then
         recover(())(checkOverloadDistinct(plain, key, f.params, f.retType, f.variadic, f.vis))
+      // The declarations sharing a private slot are an overload set of their own, and one file's
+      // call sites see every one of them — so they are told apart by the same rule, asked of the
+      // slot. The check above asked it of the plain key, whose set this file's private declarations
+      // are deliberately not in.
+      if base != plain && key != base then
+        recover(())(checkOverloadDistinct(base, key, f.params, f.retType, f.variadic, f.vis))
       checkSignatureRules(f.name, f.params, f.retType, f.variadic)
       checkValueParamArithmetic(f.tvalues.keySet, f.params.map(_.typ) ::: f.retType.toList,
         f.tparams.toSet, f.tpacks)
@@ -1036,7 +1043,7 @@ trait Hoisting extends HoistMembers {
         // Through `duplicate`, so the name is marked contested: the key goes on standing for
         // whichever declaration reached it first, and without this the *losing* file is then told
         // the name is private to its sibling — a name it declares itself, three lines up.
-        duplicate(plain, s"function '${Modules.bare(plain)}' is already declared$because")
+        duplicate(plain, s"function '${bareName(plain)}' is already declared$because")
       else
         err(s"'${qn(plain)}' is already declared with parameters this one could not be told from — " +
           s"a call passing $n argument${if n == 1 then "" else "s"} would fit both, and which " +

@@ -604,8 +604,46 @@ trait Scoping extends DeclTables {
     }.nonEmpty
   }
 
-  /** The key a written **function** name resolves to. */
-  protected def funcKey(written: String): Option[String] = resolveName(written)(funcDecls.contains)
+  /** The key a written **function** name resolves to.
+   *
+   * **A function key stands for the whole overload set**, so the reach a candidate is filtered by is
+   * the set's rather than the one declaration that happens to hold the plain key (`funcReachable`).
+   */
+  protected def funcKey(written: String): Option[String] =
+    resolveName(written, inReach = funcReachable)(funcDecls.contains)
+
+  /** Whether any declaration of a function name may be named from where the analyzer currently is.
+   *
+   * **A name is out of reach only when every declaration of it is** — `reference/modules.md § A
+   * file-private name is scoped to its file`: *"A name a file may not reach is not a candidate for
+   * it"*. The plain key names the whole overload set and is held by whichever declaration was
+   * written first, so asking `visible` of it alone answers about a declaration the file naming it
+   * may not have meant: one file's `private skip_line(string)` written ahead of another's public
+   * `skip_line(int)` took the plain key, and every other file in the module was then told the public
+   * declaration was private to the file it had never heard of.
+   *
+   * A name declared once answers exactly as `visible` does, `overloadKeys` being the key itself —
+   * and where nothing in the set is reachable the restriction is still reported off the plain key,
+   * which is the message that stood before.
+   */
+  protected def funcReachable(key: String): Boolean = overloadKeys(key).exists(visible)
+
+  /** The declarations of a function name that may be named from here, in declaration order.
+   *
+   * **The filter comes before overload resolution rather than after it**, because a declaration out
+   * of reach is not a candidate at all: it must not make a name ambiguous, must not be chosen by
+   * taking a call no reachable declaration takes, and must not stand in the roster of what a name
+   * offers.
+   *
+   * Where nothing in the set is reachable the whole set comes back, so the diagnostics that name the
+   * declarations still have them to name — the compilation is failing on the restriction either way.
+   */
+  protected def reachableOverloads(key: String): List[String] = {
+    val keys      = overloadKeys(key)
+    val reachable = keys.filter(visible)
+
+    if reachable.isEmpty then keys else reachable
+  }
 
   /** Whether this module declares the name as **storage, a constant, or an enum variant** — the
    * question a bare name has to be asked before it is treated as a function.
@@ -868,15 +906,39 @@ trait Scoping extends DeclTables {
    * can end with is only digits — a mangled type argument is a name, `arr3` or `c5` — so this takes
    * off overload suffixes and nothing besides. Where a message needs to tell two overloads apart it
    * shows their **signatures**, which is what a reader would use to tell them apart too.
+   *
+   * **A file-private slot's segment comes off for the same reason** (`filePrivateKeys`): `private1`
+   * is the compiler's answer to two files declaring one spelling privately, and a reader who wrote
+   * `pick` has no `pick.private1` in front of them. A slot may carry an overload suffix of its own,
+   * so the two come off in turn.
    */
   protected def qn(key: String): String = {
-    val cut = key.lastIndexOf('.')
-    val bare =
-      if cut > 0 && cut < key.length - 1 && key.drop(cut + 1).forall(_.isDigit) then key.take(cut)
-      else key
+    val bare = spelledKey(key)
 
     Modules.show(bare)
   }
+
+  /** A key with the segments the compiler added to it taken off — an overload's number and a
+   * file-private slot — so that what is left is the qualified name a file actually wrote.
+   *
+   * They come off in turn because a private slot can carry an overload suffix: a file that declares
+   * one spelling twice, privately, while a sibling file holds the plain key, has its second
+   * declaration at `m$pick.private1.1`.
+   */
+  private def spelledKey(key: String): String = {
+    val cut  = key.lastIndexOf('.')
+    val last = key.drop(cut + 1)
+    val slot = last.forall(_.isDigit) ||
+      (last.startsWith("private") && last.drop("private".length).forall(_.isDigit) &&
+        last.length > "private".length)
+
+    if cut > 0 && cut < key.length - 1 && slot then spelledKey(key.take(cut)) else key
+  }
+
+  /** The bare name a key was written under, with the compiler's own segments off (`spelledKey`) —
+   * what a diagnostic says when it names a declaration without its module.
+   */
+  protected def bareName(key: String): String = Modules.bare(spelledKey(key))
 
   // --- scopes and unique naming --------------------------------------------------------
 

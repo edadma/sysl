@@ -478,9 +478,13 @@ trait CallCore extends Literals with TraitObjects with ArgumentBinding {
       expected: Option[Type],
       targs: List[Expr] = Nil,
   ): TExpr = {
-    val keys = overloadKeys(plain)
+    // **A declaration this file may not name is not a candidate** (`reachableOverloads`), and it is
+    // dropped here rather than anywhere later: a sibling file's `private` helper of this spelling
+    // must not make the call ambiguous, must not be the one chosen for taking arguments no
+    // reachable declaration takes, and must not be listed as something the name offers.
+    val keys = reachableOverloads(plain)
 
-    if keys.length == 1 then callFunction(funcDecls(plain), written, expected, targs)
+    if keys.length == 1 then callFunction(funcDecls(keys.head), written, expected, targs)
     else
       val candidates = keys.map(funcDecls)
       val fitting    = candidates.flatMap(f => fitSignature(f, written, expected, targs).map(f -> _))

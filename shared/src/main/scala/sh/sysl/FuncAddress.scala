@@ -132,9 +132,11 @@ trait FuncAddress extends CallCore {
    * silently between functions that share nothing but a name.
    */
   private def overloadAddressed(written: String, plain: String, expected: Option[Type]): String = {
-    val keys = overloadKeys(plain)
+    // The same set a call chooses from — a declaration this file may not name is not one an address
+    // may be taken of either (`reachableOverloads`).
+    val keys = reachableOverloads(plain)
 
-    if keys.length == 1 then plain
+    if keys.length == 1 then keys.head
     else
       val wanted = expected.flatMap(cfnOf)
       val fits   = keys.filter(k => wanted.exists(w => probe(funcInsts(k)._1.map(_._2)).contains(w.params)))
