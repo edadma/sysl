@@ -1,6 +1,6 @@
 module sysl
 
-import sysl.sys.{sysl_putchar, sysl_snprintf, sysl_write}
+import sysl.sys.{sysl_fflush, sysl_putchar, sysl_snprintf, sysl_write}
 
 /** The printing surface, which lives in the library rather than in the compiler. `print(a, b, c)` is
  * a desugaring onto these one-value functions, chosen by each argument's static type, so the
@@ -44,6 +44,24 @@ val sink: *Stdout = ptr_cast(0usize)
 stdout() -> *Writer = sink
 
 prints(s: string) = putbytes(s.bytes)
+
+/** Push everything `putbytes` has been holding out to wherever standard output is going, right now
+ * rather than waiting for the buffer to fill or the process to exit.
+ *
+ * **C fully buffers a stream that is not a terminal.** A live report -- rows streamed to a log as
+ * they complete, output piped into another program, a test runner reading a child's output while it
+ * still runs -- can otherwise sit on everything already printed until the process ends, because
+ * `putbytes` writes through C's buffered `putchar`. This is the call that pushes it out early.
+ *
+ * `fflush(NULL)` runs underneath, which flushes every open output stream rather than naming one --
+ * `stdout` is a `#define` on Darwin (`reference/ffi.md § An extern also declares a variable`), so an
+ * `extern` naming it by pointer would not link there, and flushing everything costs nothing a program
+ * would notice, since there is normally only the one stream open to flush.
+ *
+ * `eprints` needs no matching call: `eputbytes` writes with a raw `write(2)`, which keeps no buffer
+ * of its own to hold anything back.
+ */
+flush() = sysl_fflush(null)
 
 /** The other stream, which is where a program's diagnostics belong.
  *

@@ -659,3 +659,13 @@ os_renders()
     assert_eq(str(Freestanding), "Freestanding")
     assert_eq(str(Aarch64), "Aarch64")
     assert_eq(str(X86_64), "X86_64")
+
+// What this file can pin: that the call resolves, links and returns without trapping, called once
+// and called back to back. Whether it makes a difference to a redirected stream is a claim about
+// process-level buffering that no `@test` in the library can observe -- `StdArtifactTests` runs a
+// program under a real file descriptor and watches the bytes arrive before it exits.
+@test("flush drains the buffered stdout sink without trapping, however often it is called")
+flush_is_harmless()
+    prints("")
+    flush()
+    flush()

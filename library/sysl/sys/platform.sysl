@@ -25,3 +25,8 @@ private[sysl] extern "write" sysl_write(fd: int, p: *u8, n: usize) -> isize
 private[sysl] extern "memchr" sysl_memchr(p: *u8, c: int, n: usize) -> *u8
 private[sysl] extern "memmove" sysl_memmove(dst: *u8, src: *u8, n: usize) -> *u8
 private[sysl] extern "strtod" sysl_strtod(p: *u8, end: **u8) -> real
+
+// `NULL` flushes every open output stream rather than naming one, which is what `sysl.flush` wants:
+// naming `stdout` itself would need an `extern` variable, and `stdout` is a `#define` on Darwin that
+// no `extern` reaches.
+private[sysl] extern "fflush" sysl_fflush(stream: *u8) -> int

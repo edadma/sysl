@@ -617,6 +617,64 @@ class StdArtifactTests extends AnyFreeSpec with Matchers {
       ran shouldBe Right((0, "1\ntwo\n3.5\ntrue\n"))
     }
 
+    /** `sysl.flush`'s claim is about process-level buffering, which nothing above can see: every test
+      * here runs a program to completion and reads what it printed, and C flushes everything on an
+      * ordinary exit whether or not a program ever called `flush` itself. So the case that actually
+      * distinguishes the two is a program still *running*, with its output landing somewhere that
+      * buffers by default -- a redirected file rather than a terminal -- read while the child is known
+      * to still be asleep, well short of when it would exit and flush on its own.
+      */
+    "and flush() makes buffered stdout reach a file before the process that wrote it exits" in {
+      assume(Toolchain.clangAvailable, "clang not available")
+
+      val program =
+        """import sysl.time.millis
+          |import sysl.posix.time.sleep
+          |
+          |prints("before-flush\n")
+          |flush()
+          |sleep(millis(1500))
+          |prints("after-flush\n")
+          |""".stripMargin
+
+      val obj = createTempFile("sysl-std-", ".o")
+      val exe = createTempFile("sysl-std-", "")
+      val out = createTempFile("sysl-std-", ".out")
+      val cs  = StdNative.objects()
+
+      Toolchain.compileObject(artifact._1, obj, Target.default) match
+        case Left(err) => fail(s"the standard module library did not assemble: $err")
+        case Right(_)  => ()
+
+      Toolchain.build(linked(program), exe, Target.default, obj :: cs) match
+        case Left(err) => fail(s"the program did not link: $err")
+        case Right(_)  => ()
+
+      val proc = new ProcessBuilder(exe).redirectOutput(new java.io.File(out)).start()
+
+      // Polled rather than slept for a fixed span, and stopped well inside the child's own 1500ms
+      // sleep -- what is being pinned is that the bytes arrive before the exit, not a timing coincidence.
+      val deadline = System.currentTimeMillis() + 1200
+      var seen     = ""
+      while seen != "before-flush\n" && System.currentTimeMillis() < deadline do
+        Thread.sleep(20)
+        seen = readFile(out)
+
+      val stillRunning = proc.isAlive
+      val exitCode     = proc.waitFor()
+      val whole        = readFile(out)
+
+      deleteFile(obj)
+      deleteFile(exe)
+      deleteFile(out)
+      StdNative.clean(cs)
+
+      seen shouldBe "before-flush\n"
+      stillRunning shouldBe true
+      exitCode shouldBe 0
+      whole shouldBe "before-flush\nafter-flush\n"
+    }
+
     /** Card `0229`, and it is the behavioural end of the structural claim above.
       *
       * `resolve` takes its zone as a bare-arrow parameter, so a call fixes that parameter at the
